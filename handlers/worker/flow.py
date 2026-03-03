@@ -17,7 +17,6 @@ def handle_worker_start(message):
     start_worker_flow(message.chat.id)
 
 def start_worker_flow(chat_id: str):
-    """Inicia registro de trabajador"""
     worker = db_execute("SELECT * FROM workers WHERE chat_id = ?", (str(chat_id),), fetch_one=True)
     
     if worker:
@@ -35,7 +34,6 @@ def start_worker_flow(chat_id: str):
 <b>Paso 1/5:</b> ¿Qué servicios ofrecés?
 {Icons.INFO} Podés seleccionar varios
     """
-    
     send_safe(chat_id, welcome_text, get_service_selector([]))
 
 # -----------------------------
@@ -57,7 +55,6 @@ def handle_service_toggle(call):
         bot.answer_callback_query(call.id, f"✅ {SERVICES[service_id]['name']} agregado")
     
     update_data(chat_id, selected_services=selected)
-    
     from handlers.common import edit_safe
     edit_safe(chat_id, call.message.message_id, call.message.text, get_service_selector(selected))
 
@@ -88,14 +85,12 @@ def handle_service_confirm(call):
         "current_service_idx": 0,
         "prices": {}
     })
-    
     ask_next_price(chat_id)
 
 # -----------------------------
 # INGRESO DE PRECIOS
 # -----------------------------
 def ask_next_price(chat_id: str):
-    """Pide precio para el siguiente servicio"""
     services = get_data(chat_id, "services_to_price", [])
     idx = get_data(chat_id, "current_service_idx", 0)
     
@@ -112,7 +107,6 @@ def ask_next_price(chat_id: str):
     
     service_id = services[idx]
     svc_name = SERVICES[service_id]["name"]
-    
     text = f"""
 {Icons.MONEY} <b>Paso 1/5: Precios ({idx+1}/{len(services)})</b>
 
@@ -121,10 +115,8 @@ def ask_next_price(chat_id: str):
 
 {Icons.INFO} Ingresá solo el número (ej: 5000)
     """
-    
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     markup.add(types.KeyboardButton("⏭️ Saltar este servicio"))
-    
     bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
 
 @bot.message_handler(func=lambda m: m.text and "Saltar" in m.text and get_session(m.chat.id).state == UserState.WORKER_ENTERING_PRICE)
@@ -160,10 +152,6 @@ def handle_price_input(message):
     services = get_data(chat_id, "services_to_price", [])
     idx = get_data(chat_id, "current_service_idx", 0)
     
-    if idx >= len(services):
-        ask_next_price(chat_id)
-        return
-        
     current_service = services[idx]
     prices = get_data(chat_id, "prices", {})
     prices[current_service] = price
@@ -228,8 +216,7 @@ Para la seguridad de todos, necesitamos verificar tu identidad.
 # -----------------------------
 # SUBIDA DE DNI
 # -----------------------------
-@bot.message_handler(content_types=['photo'], 
-                    func=lambda m: get_session(m.chat.id).state == UserState.WORKER_UPLOADING_DNI)
+@bot.message_handler(content_types=['photo'], func=lambda m: get_session(m.chat.id).state == UserState.WORKER_UPLOADING_DNI)
 def handle_dni_upload(message):
     chat_id = message.chat.id
     file_id = message.photo[-1].file_id
@@ -262,16 +249,14 @@ Podés actualizarla cuando quieras con /ubicacion
 
     bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
 
-
 # -----------------------------
-# HANDLER DE UBICACIÓN NIVEL ENTERPRISE
+# HANDLER DE UBICACIÓN FINAL
 # -----------------------------
 @bot.message_handler(content_types=['location'])
 def handle_worker_location(message):
     chat_id = message.chat.id
     session = get_session(chat_id)
 
-    # Validar que estemos en flujo de registro
     if not session or session.state != UserState.WORKER_SHARING_LOCATION:
         return
 
@@ -292,7 +277,7 @@ def handle_worker_location(message):
     # Limpiar estado de flujo
     clear_state(chat_id)
 
-    # Mensaje final único, con teclado limpio y confirmación
+    # Mensaje final único, teclado limpio y confirmación
     final_text = f"""
 🎉 <b>¡Registro completado!</b>
 
