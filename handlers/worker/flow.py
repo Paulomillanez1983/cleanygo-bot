@@ -161,6 +161,19 @@ def handle_price_input(message):
     services = get_data(chat_id, "services_to_price", [])
     idx = get_data(chat_id, "current_service_idx", 0)
     
+    # Seguridad: si ya terminamos los servicios, pasar a nombre
+    if idx >= len(services):
+        set_state(chat_id, UserState.WORKER_ENTERING_NAME)
+        text = f"""
+{Icons.USER} <b>Paso 2/5: Tu nombre</b>
+
+¿Cómo te llaman los clientes?
+        """
+        markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+        markup.add(types.KeyboardButton("❌ Cancelar"))
+        bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
+        return
+    
     if text == "⏭️ Saltar":
         # Guardar precio como None o 0
         prices = get_data(chat_id, "prices", {})
@@ -200,13 +213,13 @@ def handle_name_input(message):
         bot.send_message(chat_id, "❌ El nombre es muy corto. Intentá de nuevo.")
         return
     
-    # Guardar en DB temporal o session
+    # Guardar en session
     update_data(chat_id, worker_name=name)
     
     # Pasar a teléfono
     set_state(chat_id, UserState.WORKER_ENTERING_PHONE)
     text = f"""
-{Icons.PHONE} <b>Paso 3/5: Teléfono</b>
+📱 <b>Paso 3/5: Teléfono</b>
 
 Ingresá tu número de contacto (ej: 11 1234-5678)
     """
