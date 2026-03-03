@@ -4,7 +4,7 @@ import telebot
 # 🔑 Configuración del token
 # ==============================
 # Pone tu token directamente aquí
-TOKEN = "TU_TOKEN_AQUI"  # Reemplazá con el token que te dio @BotFather
+TOKEN = "8534288619:AAG1i5-PdjUABerTQCp_y84XubBfVNJ34FU"  # Reemplazá con el token que te dio @BotFather
 
 # Verificar que el token no esté vacío
 if not TOKEN:
