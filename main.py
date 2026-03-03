@@ -4,13 +4,29 @@ import re
 import math
 import threading
 import time
+import json
+import os
 
 TOKEN = "8534288619:AAG1i5-PdjUABerTQCp_y84XubBfVNJ34FU"
 bot = telebot.TeleBot(TOKEN)
 
-workers = {}  # chat_id -> {"servicios": [], "precios": {}, "disponible": True, "info": {}, "ubicacion": {}}
-clients = {}  # chat_id -> {"estado": str, "pedido": {}, "pedido_abierto": bool}
-services_list = ["Niñera", "Cuidado de personas", "Instalación de aire acondicionado", "Visita técnica de aire acondicionado"]
+# ==============================
+# 🔹 Datos persistentes temporales
+# ==============================
+DATA_FILE = "bot_data.json"
+
+if os.path.exists(DATA_FILE):
+    with open(DATA_FILE, "r") as f:
+        data = json.load(f)
+        workers = data.get("workers", {})
+        clients = data.get("clients", {})
+else:
+    workers = {}
+    clients = {}
+
+def save_data():
+    with open(DATA_FILE, "w") as f:
+        json.dump({"workers": workers, "clients": clients}, f)
 
 # ==============================
 # 🔹 Helpers
@@ -34,14 +50,17 @@ def haversine(lat1, lon1, lat2, lon2):
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
     return R * c
 
+services_list = ["Niñera", "Cuidado de personas", "Instalación de aire acondicionado", "Visita técnica de aire acondicionado"]
+
 # ==============================
 # 🔹 Registro trabajador y precios
 # ==============================
 @bot.message_handler(commands=['soytrabajador'])
 def start_worker_registration(message):
-    chat_id = message.chat.id
+    chat_id = str(message.chat.id)
     workers[chat_id] = {"servicios": [], "precios": {}, "disponible": True, "info": {}, "ubicacion": {}}
     clients[chat_id] = {"estado": "seleccionando_servicios", "pedido": {}}
+    save_data()
     ask_services_worker(chat_id)
 
 def ask_services_worker(chat_id):
@@ -53,7 +72,7 @@ def ask_services_worker(chat_id):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("service_") or call.data=="confirm_services")
 def handle_service_selection(call):
-    chat_id = call.message.chat.id
+    chat_id = str(call.message.chat.id)
     data = call.data
 
     if chat_id not in workers:
@@ -68,6 +87,7 @@ def handle_service_selection(call):
         else:
             workers[chat_id]["servicios"].append(service)
             bot.answer_callback_query(call.id, f"✅ {service} agregado")
+        save_data()
     elif data == "confirm_services":
         if not workers[chat_id]["servicios"]:
             bot.answer_callback_query(call.id, "Debes seleccionar al menos un servicio")
@@ -75,21 +95,23 @@ def handle_service_selection(call):
         bot.answer_callback_query(call.id, "Servicios confirmados")
         send_safe(chat_id, f"✅ Servicios seleccionados: {', '.join(workers[chat_id]['servicios'])}")
         clients[chat_id]["estado"] = "ingresando_precios"
+        save_data()
         ask_price_worker(chat_id, 0)
 
 def ask_price_worker(chat_id, index):
     if index >= len(workers[chat_id]["servicios"]):
         send_safe(chat_id, "✅ Todos los precios ingresados. Ahora ingrese sus datos personales.")
         clients[chat_id]["estado"] = "ingresando_info"
+        save_data()
         ask_worker_info(chat_id)
         return
     service = workers[chat_id]["servicios"][index]
     clients[chat_id]["pedido"]["index_price"] = index
     send_safe(chat_id, f"Ingresá el precio para '{service}':")
 
-@bot.message_handler(func=lambda m: clients.get(m.chat.id, {}).get("estado")=="ingresando_precios")
+@bot.message_handler(func=lambda m: clients.get(str(m.chat.id), {}).get("estado")=="ingresando_precios")
 def handle_worker_price(message):
-    chat_id = message.chat.id
+    chat_id = str(message.chat.id)
     try:
         index = clients[chat_id]["pedido"]["index_price"]
         service = workers[chat_id]["servicios"][index]
@@ -99,6 +121,7 @@ def handle_worker_price(message):
             return
         workers[chat_id]["precios"][service] = price
         send_safe(chat_id, f"💰 Precio de '{service}' registrado: ${price}")
+        save_data()
         ask_price_worker(chat_id, index+1)
     except ValueError:
         send_safe(chat_id, "❌ Ingresá un número válido para el precio.")
@@ -106,29 +129,33 @@ def handle_worker_price(message):
 def ask_worker_info(chat_id):
     send_safe(chat_id, "📄 Enviá tu nombre completo:")
     clients[chat_id]["estado"] = "nombre_worker"
+    save_data()
 
-@bot.message_handler(func=lambda m: clients.get(m.chat.id, {}).get("estado")=="nombre_worker")
+@bot.message_handler(func=lambda m: clients.get(str(m.chat.id), {}).get("estado")=="nombre_worker")
 def handle_worker_name(message):
-    chat_id = message.chat.id
+    chat_id = str(message.chat.id)
     workers[chat_id]["info"]["nombre"] = message.text
     send_safe(chat_id, "📄 Ahora enviá una foto de tu DNI (frontal):")
     clients[chat_id]["estado"] = "dni_worker"
+    save_data()
 
-@bot.message_handler(content_types=['photo'], func=lambda m: clients.get(m.chat.id, {}).get("estado")=="dni_worker")
+@bot.message_handler(content_types=['photo'], func=lambda m: clients.get(str(m.chat.id), {}).get("estado")=="dni_worker")
 def handle_worker_dni(message):
-    chat_id = message.chat.id
+    chat_id = str(message.chat.id)
     file_id = message.photo[-1].file_id
     workers[chat_id]["info"]["dni"] = file_id
     send_safe(chat_id, "✅ Registro completo. Ahora estás en línea para recibir pedidos.\nPodés usar /offline para salir de línea.")
     clients[chat_id]["estado"] = "en_linea"
     workers[chat_id]["disponible"] = True
+    save_data()
 
 @bot.message_handler(commands=['offline'])
 def go_offline(message):
-    chat_id = message.chat.id
+    chat_id = str(message.chat.id)
     if chat_id in workers:
         workers[chat_id]["disponible"] = False
         send_safe(chat_id, "🛑 Ahora estás fuera de línea. No recibirás nuevos pedidos.")
+        save_data()
     else:
         send_safe(chat_id, "❌ No estás registrado como trabajador.")
 
@@ -137,7 +164,7 @@ def go_offline(message):
 # ==============================
 @bot.message_handler(commands=['actualizarubicacion'])
 def update_worker_location(message):
-    chat_id = message.chat.id
+    chat_id = str(message.chat.id)
     if chat_id not in workers:
         send_safe(chat_id, "❌ No estás registrado como trabajador.")
         return
@@ -145,30 +172,33 @@ def update_worker_location(message):
     markup.add(types.KeyboardButton("📍 Enviar ubicación", request_location=True))
     send_safe(chat_id, "📍 Por favor enviá tu ubicación actual:", markup)
     clients[chat_id]["estado"] = "actualizando_ubicacion"
+    save_data()
 
-@bot.message_handler(content_types=['location'], func=lambda m: clients.get(m.chat.id, {}).get("estado")=="actualizando_ubicacion")
+@bot.message_handler(content_types=['location'], func=lambda m: clients.get(str(m.chat.id), {}).get("estado")=="actualizando_ubicacion")
 def handle_worker_location(message):
-    chat_id = message.chat.id
+    chat_id = str(message.chat.id)
     location = message.location
     workers[chat_id]["ubicacion"] = {"lat": location.latitude, "lon": location.longitude}
     send_safe(chat_id, "✅ Ubicación actualizada.")
     clients[chat_id]["estado"] = "en_linea"
+    save_data()
 
 # ==============================
 # 🔹 Cliente solicita servicio
 # ==============================
 @bot.message_handler(commands=['pedirservicio'])
 def request_service(message):
-    chat_id = message.chat.id
+    chat_id = str(message.chat.id)
     clients[chat_id] = {"estado": "seleccionando_servicio", "pedido": {}, "pedido_abierto": True}
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     for s in services_list:
         markup.add(s)
     send_safe(chat_id, "📝 Seleccioná el servicio que necesitás:", markup)
+    save_data()
 
-@bot.message_handler(func=lambda m: clients.get(m.chat.id, {}).get("estado")=="seleccionando_servicio")
+@bot.message_handler(func=lambda m: clients.get(str(m.chat.id), {}).get("estado")=="seleccionando_servicio")
 def handle_client_service(message):
-    chat_id = message.chat.id
+    chat_id = str(message.chat.id)
     service = message.text
     if service not in services_list:
         send_safe(chat_id, "❌ Servicio inválido, seleccioná uno de la lista.")
@@ -178,18 +208,20 @@ def handle_client_service(message):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     markup.add(types.KeyboardButton("📍 Enviar ubicación", request_location=True))
     send_safe(chat_id, "📍 Enviá tu ubicación para el servicio:", markup)
+    save_data()
 
-@bot.message_handler(content_types=['location'], func=lambda m: clients.get(m.chat.id, {}).get("estado")=="ingresando_ubicacion")
+@bot.message_handler(content_types=['location'], func=lambda m: clients.get(str(m.chat.id), {}).get("estado")=="ingresando_ubicacion")
 def handle_client_location(message):
-    chat_id = message.chat.id
+    chat_id = str(message.chat.id)
     location = message.location
     clients[chat_id]["pedido"]["ubicacion"] = {"lat": location.latitude, "lon": location.longitude}
     clients[chat_id]["estado"] = "ingresando_horario"
     send_safe(chat_id, "🕒 Ingresá la hora para el servicio (HH:MM):")
+    save_data()
 
-@bot.message_handler(func=lambda m: clients.get(m.chat.id, {}).get("estado")=="ingresando_horario")
+@bot.message_handler(func=lambda m: clients.get(str(m.chat.id), {}).get("estado")=="ingresando_horario")
 def handle_client_hora(message):
-    chat_id = message.chat.id
+    chat_id = str(message.chat.id)
     hora = message.text
     if not validate_hora(hora):
         send_safe(chat_id, "❌ Formato inválido. Ingresá la hora como HH:MM")
@@ -207,9 +239,10 @@ def handle_client_hora(message):
               f"Mapa: <a href='https://www.google.com/maps/search/?api=1&query={ubic_cliente['lat']},{ubic_cliente['lon']}'>Ver en mapa</a>",
               markup_confirm)
     clients[chat_id]["estado"] = "confirmando_pedido"
+    save_data()
 
 # ==============================
-# 🔹 Enviar pedido con reintentos, urgencia y mini-mapa + botón reintentar
+# 🔹 Enviar pedido con reintentos y urgencia
 # ==============================
 def enviar_pedido_con_reintentos(client_id, pedido, radio_inicial=5, max_radio=20, incremento=5, espera_segundos=30):
     radio_km = radio_inicial
@@ -272,19 +305,20 @@ def enviar_pedido_con_reintentos(client_id, pedido, radio_inicial=5, max_radio=2
 # ==============================
 @bot.callback_query_handler(func=lambda call: call.data=="reintentar_pedido")
 def reintentar_pedido(call):
-    chat_id = call.message.chat.id
+    chat_id = str(call.message.chat.id)
     if chat_id in clients and clients[chat_id].get("pedido"):
         pedido = clients[chat_id]["pedido"].copy()
         clients[chat_id]["pedido_abierto"] = True
         threading.Thread(target=enviar_pedido_con_reintentos, args=(chat_id, pedido), daemon=True).start()
         send_safe(chat_id, "🔄 Reintentando búsqueda de prestadores cercanos...")
+        save_data()
 
 # ==============================
 # 🔹 Confirmar pedido
 # ==============================
 @bot.callback_query_handler(func=lambda call: call.data=="confirmar_pedido")
 def confirm_pedido(call):
-    chat_id = call.message.chat.id
+    chat_id = str(call.message.chat.id)
     if chat_id not in clients:
         send_safe(chat_id, "❌ Error interno: cliente no registrado.")
         return
@@ -293,6 +327,7 @@ def confirm_pedido(call):
     clients[chat_id]["estado"] = "buscando_prestador"
     threading.Thread(target=enviar_pedido_con_reintentos, args=(chat_id, pedido), daemon=True).start()
     send_safe(chat_id, "✅ Pedido enviado a los prestadores cercanos. Esperá que acepten.")
+    save_data()
 
 # ==============================
 # 🔹 Confirmación llegada prestador al cliente
@@ -307,9 +342,9 @@ def enviar_confirmacion_cliente(client_id, servicio, prestador_id):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("cliente_aceptar_") or call.data.startswith("cliente_rechazar_"))
 def handle_cliente_confirmacion(call):
-    client_id = call.message.chat.id
+    client_id = str(call.message.chat.id)
     action, prestador_id_str = call.data.split("_")[1:]  # ['aceptar', 'prestador_id']
-    prestador_id = int(prestador_id_str)
+    prestador_id = prestador_id_str
 
     if action == "aceptar":
         send_safe(client_id, "✅ Has confirmado la recepción del servicio. ¡Gracias!")
@@ -323,19 +358,5 @@ def handle_cliente_confirmacion(call):
 # ==============================
 @bot.callback_query_handler(func=lambda call: call.data.startswith("aceptar_") or call.data.startswith("rechazar_"))
 def handle_worker_response(call):
-    worker_id = call.message.chat.id
-    action, client_id_str = call.data.split("_")
-    client_id = int(client_id_str)
-
-    if client_id not in clients:
-        send_safe(worker_id, "❌ Pedido ya no existe o fue cancelado.")
-        return
-
-    if action == "aceptar":
-        if not clients[client_id].get("pedido_abierto", True):
-            send_safe(worker_id, "❌ Lo sentimos, otro trabajador ya tomó este pedido.")
-            return
-
-        clients[client_id]["pedido_abierto"] = False
-        workers[worker_id]["disponible"] = False
-        send_safe(worker_id, "🎉 Tomaste el trabajo. Contactá al cliente para coordinar.")
+    worker_id = str(call.message.chat.id)
+    action,
