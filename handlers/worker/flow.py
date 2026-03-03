@@ -252,22 +252,25 @@ Podés actualizarla cuando quieras con /ubicacion
 # -----------------------------
 # HANDLER DE UBICACIÓN FINAL
 # -----------------------------
-@bot.message_handler(content_types=['location'])
+@bot.message_handler(content_types=['location', 'venue'])
 def handle_worker_location(message):
     chat_id = message.chat.id
     session = get_session(chat_id)
 
-    # Solo procesar si estamos en flujo de registro
     if not session or session.state != UserState.WORKER_SHARING_LOCATION:
         return
 
-    if not message.location:
+    # Detectar ubicación según tipo
+    lat, lon = None, None
+    if message.location:
+        lat, lon = message.location.latitude, message.location.longitude
+    elif message.venue:
+        lat, lon = message.venue.location.latitude, message.venue.location.longitude
+
+    if lat is None or lon is None:
         bot.send_message(chat_id, "❌ No se pudo detectar tu ubicación. Usá el botón nativo de Telegram.")
         return
 
-    lat, lon = message.location.latitude, message.location.longitude
-
-    # Guardar ubicación y marcar disponible
     timestamp = int(time.time())
     db_execute(
         "UPDATE workers SET lat = ?, lon = ?, last_update = ?, disponible = 1 WHERE chat_id = ?",
@@ -275,10 +278,8 @@ def handle_worker_location(message):
         commit=True
     )
 
-    # Limpiar estado de flujo
     clear_state(chat_id)
 
-    # ✅ Mensaje único final: teclado limpio y confirmación
     final_text = f"""
 🎉 <b>¡Registro completado!</b>
 
