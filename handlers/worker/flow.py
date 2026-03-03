@@ -107,6 +107,7 @@ def ask_next_price(chat_id: str):
     idx = get_data(chat_id, "current_service_idx", 0)
     
     if idx >= len(services):
+        # CORREGIDO: Cambiar a send_safe en lugar de remove_keyboard para asegurar que el mensaje llegue
         set_state(chat_id, UserState.WORKER_ENTERING_NAME)
         text = f"""
 {Icons.USER} <b>Paso 2/5: Tu nombre</b>
@@ -114,7 +115,8 @@ def ask_next_price(chat_id: str):
 ¿Cómo te llaman los clientes?
 {Icons.INFO} Ingresá tu nombre completo
         """
-        remove_keyboard(chat_id, text)
+        # CORREGIDO: Usar send_safe sin teclado para forzar respuesta de texto
+        send_safe(chat_id, text)
         return
     
     service_id = services[idx]
@@ -150,6 +152,12 @@ def handle_price_input(message):
     
     services = get_data(chat_id, "services_to_price", [])
     idx = get_data(chat_id, "current_service_idx", 0)
+    
+    # CORREGIDO: Verificar que idx no exceda la lista
+    if idx >= len(services):
+        ask_next_price(chat_id)
+        return
+        
     current_service = services[idx]
     
     prices = get_data(chat_id, "prices", {})
@@ -255,7 +263,8 @@ def handle_worker_location(message):
     )
     
     clear_state(chat_id)
-    remove_keyboard(chat_id)
+    # CORREGIDO: Usar send_safe en lugar de remove_keyboard para consistencia
+    send_safe(chat_id, "✅ ¡Registro completado!")
     
     success_text = f"""
 {Icons.PARTY} <b>¡Registro completado!</b>
