@@ -36,6 +36,14 @@ def remove_keyboard(chat_id, text=None):
         return send_safe(chat_id, text, markup)
     return None
 
+def format_price(price):
+    """Formatea un precio numérico a string legible"""
+    try:
+        price = float(price)
+        return f"${price:,.0f}".replace(",", ".")
+    except (ValueError, TypeError):
+        return f"${price}"
+
 # ==================== HANDLERS COMUNES ====================
 
 @bot.message_handler(commands=['start'])
