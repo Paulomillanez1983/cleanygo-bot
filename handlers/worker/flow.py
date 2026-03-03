@@ -255,24 +255,32 @@ def handle_dni_upload(message):
 @bot.message_handler(content_types=['location'], 
                     func=lambda m: get_session(m.chat.id).state == UserState.WORKER_SHARING_LOCATION)
 def handle_worker_location(message):
+    from config import logger
+    
     chat_id = message.chat.id
+    logger.info(f"=== WORKER LOCATION RECIBIDA === chat_id: {chat_id}")
+    logger.info(f"Location: lat={message.location.latitude}, lon={message.location.longitude}")
+    logger.info(f"Estado actual: {get_session(chat_id).state}")
     
     try:
         lat = message.location.latitude
         lon = message.location.longitude
         
         import time
-        db_execute(
+        result = db_execute(
             "UPDATE workers SET lat = ?, lon = ?, last_update = ?, disponible = 1 WHERE chat_id = ?",
             (lat, lon, int(time.time()), str(chat_id)),
             commit=True
         )
+        logger.info(f"DB update result: {result}")
         
         clear_state(chat_id)
+        logger.info(f"Estado limpiado para {chat_id}")
         
-        # IMPORTANTE: Eliminar el teclado de ubicación primero
+        # Eliminar teclado
         from handlers.common import remove_keyboard
         remove_keyboard(chat_id, "✅ Ubicación guardada")
+        logger.info(f"Teclado removido para {chat_id}")
         
         success_text = f"""
 {Icons.PARTY} <b>¡Registro completado!</b>
@@ -289,8 +297,11 @@ Ya estás activo y recibirás notificaciones de trabajos cercanos.
         """
         
         bot.send_message(chat_id, success_text, parse_mode="HTML")
+        logger.info(f"Mensaje de éxito enviado a {chat_id}")
         
     except Exception as e:
-        from config import logger
-        logger.error(f"Error en handle_worker_location: {e}")
-        bot.send_message(chat_id, f"{Icons.ERROR} Error al guardar ubicación. Intentá de nuevo.")
+        logger.error(f"ERROR en handle_worker_location: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        bot.send_message(chat_id, f"{Icons.ERROR} Error: {str(e)}")
+
