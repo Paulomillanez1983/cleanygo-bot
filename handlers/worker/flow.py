@@ -78,6 +78,29 @@ def handle_service_confirm(call):
     
     ask_next_price(chat_id)
 
+@bot.callback_query_handler(func=lambda c: c.data == "cancel")
+def handle_skip_service(call):
+    """Handler para saltar un servicio (botón 'Saltar este servicio')"""
+    chat_id = call.message.chat.id
+    
+    # Verificar que esté en el estado correcto
+    session = get_session(chat_id)
+    if session.state != UserState.WORKER_ENTERING_PRICE:
+        bot.answer_callback_query(call.id, "Acción no válida")
+        return
+    
+    services = get_data(chat_id, "services_to_price", [])
+    idx = get_data(chat_id, "current_service_idx", 0)
+    
+    if idx < len(services):
+        current_service = services[idx]
+        bot.answer_callback_query(call.id, f"⏭️ {SERVICES[current_service]['name']} saltado")
+    
+    # Avanzar al siguiente servicio sin guardar precio
+    update_data(chat_id, current_service_idx=idx + 1)
+    ask_next_price(chat_id)
+
+
 def ask_next_price(chat_id: str):
     """Pide precio para el siguiente servicio"""
     services = get_data(chat_id, "services_to_price", [])
