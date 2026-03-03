@@ -286,28 +286,31 @@ def handle_worker_location(message):
         bot.send_message(chat_id, f"{Icons.ERROR} Error al guardar tu ubicación. Intentá nuevamente o escribí /cancel")
 
 # -----------------------------
-# PROCESAR UBICACIÓN NIVEL 10/10
+# PROCESAR UBICACIÓN ENTERPRISE
 # -----------------------------
 def process_worker_location(chat_id: str, lat: float, lon: float):
-    """Procesa y guarda la ubicación del trabajador y cierra el flujo de registro correctamente"""
-    import time
+    """Procesa la ubicación y cierra el flujo correctamente sin que quede clavado"""
     timestamp = int(time.time())
-    
-    # 1️⃣ Guardar ubicación en DB
+
+    # 1️⃣ Guardar ubicación
     db_execute(
         "UPDATE workers SET lat = ?, lon = ?, last_update = ?, disponible = 1 WHERE chat_id = ?",
         (lat, lon, timestamp, str(chat_id)),
         commit=True
     )
-    
-    # 2️⃣ Limpiar estado de sesión
-    clear_state(chat_id)
-    
-    # 3️⃣ Limpiar teclado nativo de ubicación inmediatamente
-    bot.send_message(chat_id, "✅ Ubicación recibida correctamente", reply_markup=types.ReplyKeyboardRemove())
 
-    # 4️⃣ Mensaje final de registro completado, con teclado limpio
-    success_text = f"""
+    # 2️⃣ Limpiar estado
+    clear_state(chat_id)
+
+    # 3️⃣ Mensaje inmediato de confirmación
+    bot.send_message(
+        chat_id,
+        "✅ Ubicación recibida correctamente",
+        reply_markup=types.ReplyKeyboardRemove()
+    )
+
+    # 4️⃣ Enviar mensaje final de registro completo
+    final_text = f"""
 {Icons.PARTY} <b>¡Registro completado!</b>
 
 Ya estás activo y recibirás notificaciones de trabajos cercanos.
@@ -320,5 +323,9 @@ Ya estás activo y recibirás notificaciones de trabajos cercanos.
 /perfil - Ver tu perfil
 /ayuda - Ayuda y soporte
     """
-    
-    bot.send_message(chat_id, success_text, parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
+    bot.send_message(
+        chat_id,
+        final_text,
+        parse_mode="HTML",
+        reply_markup=types.ReplyKeyboardRemove()
+    )
