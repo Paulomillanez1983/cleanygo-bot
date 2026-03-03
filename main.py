@@ -736,6 +736,175 @@ def handle_service_toggle(call):
     # Actualizar teclado
     edit_safe(chat_id, call.message.message_id, call.message.text, get_service_selector(chat_id))
 
+def find_available_workers(service_id: str, lat: float, lon: float, hora_solicitada: str, 
+                          fecha_solicitada: str = None, radius_km: float = 10.0):
+    """
+    Encuentra trabajadores disponibles que:
+    - Estén online (disponible = 1)
+    - Ofrezcan el servicio solicitado
+    - Estén dentro del radio de distancia
+    - NO tengan un trabajo asignado que se solape con la hora solicitada
+    """
+    
+    # Obtener todos los trabajadores que ofrecen este servicio y están online
+    workers = db_execute(
+        """SELECT w.chat_id, w.nombre, w.lat, w.lon, w.rating, ws.precio 
+           FROM workers w
+           JOIN worker_services ws ON w.chat_id = ws.chat_id
+           WHERE ws.service_id = ? AND w.disponible = 1 
+           AND w.lat IS NOT NULL AND w.lon IS NOT NULL""",
+        (service_id,)
+    )
+    
+    if not workers:
+        return [], "no_workers_online"
+    
+    # Filtrar por distancia
+    nearby_workers = []
+    for w in workers:
+        dist = haversine(lat, lon, w[2], w[3])
+        if dist <= radius_km:
+            nearby_workers.append((*w, dist))
+    
+    if not nearby_workers:
+        # Hay trabajadores online pero lejos
+        return [], "workers_far"
+    
+    # Verificar disponibilidad horaria - excluir trabajadores ocupados
+    hora_dt = parse_time_string(hora_solicitada)  # Convertir "14:30 PM" a datetime
+    
+    available_workers = []
+    busy_workers = []
+    
+    for worker in nearby_workers:
+        worker_id = worker[0]
+        
+        # Buscar si tiene trabajos asignados que se solapen con esta hora
+        # Consideramos que un trabajo dura 2 horas por defecto
+        busy = db_execute(
+            """SELECT id, hora, status FROM requests 
+               WHERE worker_chat_id = ? 
+               AND status IN ('assigned', 'in_progress', 'waiting_acceptance')
+               AND date(created_at, 'unixepoch', 'localtime') = date('now', 'localtime')""",
+            (worker_id,), fetch_one=True
+        )
+        
+        is_available = True
+        if busy:
+            # Verificar solapamiento de horarios
+            busy_hora = busy[1]  # "14:30 PM"
+            if is_time_overlap(busy_hora, hora_solicitada):
+                is_available = False
+                busy_workers.append(worker)
+        
+        if is_available:
+            available_workers.append(worker)
+    
+    if not available_workers and busy_workers:
+        # Todos los trabajadores cercanos están ocupados a esa hora
+        return [], "workers_busy", busy_workers
+    
+    # Ordenar por distancia
+    available_workers.sort(key=lambda x: x[6])
+    return available_workers, "success"
+
+
+def parse_time_string(time_str: str) -> datetime:
+    """Convierte '14:30 PM' a objeto datetime de hoy"""
+    try:
+        # Formatos posibles: "14:30 PM", "2:30 PM", "14:30"
+        time_str = time_str.strip().upper()
+        
+        # Remover AM/PM si existe y ajustar
+        is_pm = "PM" in time_str
+        is_am = "AM" in time_str
+        
+        time_clean = time_str.replace("AM", "").replace("PM", "").strip()
+        
+        # Parsear hora:minuto
+        if ":" in time_clean:
+            hour, minute = map(int, time_clean.split(":"))
+        else:
+            hour = int(time_clean)
+            minute = 0
+        
+        # Ajustar formato 12h a 24h
+        if is_pm and hour != 12:
+            hour += 12
+        elif is_am and hour == 12:
+            hour = 0
+            
+        now = datetime.now()
+        return now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    except Exception as e:
+        logger.error(f"Error parseando hora {time_str}: {e}")
+        return datetime.now()
+
+
+def is_time_overlap(time1: str, time2: str, duration_hours: int = 2) -> bool:
+    """
+    Verifica si dos horarios se solapan
+    Considera que cada trabajo dura 'duration_hours' horas
+    """
+    try:
+        dt1 = parse_time_string(time1)
+        dt2 = parse_time_string(time2)
+        
+        # Crear rangos de tiempo (inicio y fin de cada trabajo)
+        start1 = dt1
+        end1 = dt1 + timedelta(hours=duration_hours)
+        
+        start2 = dt2
+        end2 = dt2 + timedelta(hours=duration_hours)
+        
+        # Verificar solapamiento
+        return (start1 < end2) and (start2 < end1)
+    except Exception as e:
+        logger.error(f"Error comparando horarios: {e}")
+        return False  # Si hay error, asumir que no hay solapamiento
+
+
+def get_worker_availability_status(service_id: str, lat: float, lon: float, 
+                                   hora_solicitada: str) -> dict:
+    """
+    Obtiene estadísticas detalladas de disponibilidad para mostrar al cliente
+    """
+    stats = {
+        "total_online": 0,
+        "with_service": 0,
+        "nearby": 0,
+        "available_now": 0,
+        "busy_now": 0,
+        "alternative_times": []
+    }
+    
+    # Contar online
+    online = db_execute("SELECT COUNT(*) FROM workers WHERE disponible = 1", fetch_one=True)
+    stats["total_online"] = online[0] if online else 0
+    
+    # Contar con este servicio
+    with_service = db_execute(
+        """SELECT COUNT(DISTINCT w.chat_id) 
+           FROM workers w
+           JOIN worker_services ws ON w.chat_id = ws.chat_id
+           WHERE ws.service_id = ? AND w.disponible = 1""",
+        (service_id,), fetch_one=True
+    )
+    stats["with_service"] = with_service[0] if with_service else 0
+    
+    # Buscar disponibles
+    available, status, *extra = find_available_workers(service_id, lat, lon, hora_solicitada)
+    
+    if status == "success":
+        stats["available_now"] = len(available)
+        stats["nearby"] = len(available)
+    elif status == "workers_busy":
+        busy = extra[0] if extra else []
+        stats["busy_now"] = len(busy)
+        stats["nearby"] = len(busy)
+    
+    return stats
+
 @bot.callback_query_handler(func=lambda c: c.data == "svc_confirm")
 def handle_service_confirm(call):
     chat_id = call.message.chat.id
@@ -811,7 +980,100 @@ def handle_price_input(message):
     except ValueError:
         send_safe(chat_id, f"{Icons.ERROR} Por favor ingresá solo números (ej: 5000)")
         return
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("retry_search:"))
+def handle_retry_search(call):
+    """Reintentar búsqueda con la misma solicitud"""
+    chat_id = call.message.chat.id
+    request_id = int(call.data.split(":")[1])
     
+    # Obtener datos de la solicitud existente
+    request = db_execute(
+        "SELECT service_id, hora, lat, lon FROM requests WHERE id = ?",
+        (request_id,), fetch_one=True
+    )
+    
+    if not request:
+        bot.answer_callback_query(call.id, "Solicitud no encontrada")
+        return
+    
+    service_id, hora, lat, lon = request
+    
+    # Actualizar timestamp de búsqueda
+    db_execute(
+        "UPDATE requests SET status='searching', created_at = ? WHERE id = ?",
+        (int(time.time()), request_id), commit=True
+    )
+    
+    bot.answer_callback_query(call.id, "Reintentando búsqueda...")
+    
+    # Simular nueva llamada a confirm_yes con los datos existentes
+    # Guardar en sesión temporal
+    update_data(chat_id, 
+        service_id=service_id,
+        selected_time=hora.split()[0],
+        time_period=hora.split()[1] if len(hora.split()) > 1 else "PM",
+        lat=lat, lon=lon
+    )
+    
+    # Reejecutar búsqueda
+    handle_confirm_request(call)
+
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith("alt_times:"))
+def handle_alternative_times(call):
+    """Muestra horarios alternativos disponibles"""
+    chat_id = call.message.chat.id
+    parts = call.data.split(":")
+    service_id = parts[1]
+    request_id = int(parts[2])
+    
+    # Buscar horarios alternativos (simple: +/- 2 horas)
+    alternativas = []
+    horas_posibles = [8, 10, 12, 14, 16, 18, 20]
+    
+    text = f"""
+{Icons.CLOCK} <b>Horarios alternativos disponibles</b>
+
+{SERVICES[service_id]['icon']} <b>{SERVICES[service_id]['name']}</b>
+
+Seleccioná otro horario:
+    """
+    
+    markup = types.InlineKeyboardMarkup(row_width=3)
+    
+    for h in horas_posibles:
+        hora_str = f"{h:02d}:00"
+        markup.add(types.InlineKeyboardButton(
+            f"{hora_str}", 
+            callback_data=f"change_time:{request_id}:{hora_str}"
+        ))
+    
+    markup.add(types.InlineKeyboardButton(
+        f"{Icons.BACK} Volver", callback_data=f"retry_search:{request_id}"
+    ))
+    
+    edit_safe(chat_id, call.message.message_id, text, markup)
+
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith("change_time:"))
+def handle_change_time(call):
+    """Cambiar horario de solicitud existente"""
+    chat_id = call.message.chat.id
+    parts = call.data.split(":")
+    request_id = int(parts[1])
+    nueva_hora = parts[2]
+    
+    # Actualizar en DB
+    db_execute(
+        "UPDATE requests SET hora = ? WHERE id = ?",
+        (f"{nueva_hora} PM", request_id), commit=True
+    )
+    
+    bot.answer_callback_query(call.id, f"Hora cambiada a {nueva_hora}")
+    
+    # Reintentar búsqueda
+    handle_retry_search(call)
+
     # Guardar precio
     services = get_data(chat_id, "services_to_price", [])
     idx = get_data(chat_id, "current_service_idx", 0)
