@@ -20,7 +20,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-services_list = ["Niñera", "Cuidado de personas", "Instalación de aire acondicionado", "Visita técnica de aire acondicionado"]
+services_list = [
+    "Niñera",
+    "Cuidado de personas",
+    "Instalación de aire acondicionado",
+    "Visita técnica de aire acondicionado"
+]
 
 async def init_db():
     async with aiosqlite.connect(DB_FILE) as db:
@@ -104,9 +109,6 @@ def get_state(chat_id):
 def clear_state(chat_id):
     user_states.pop(str(chat_id), None)
 
-# ==============================
-# REGISTRO TRABAJADOR
-# ==============================
 @bot.message_handler(commands=['soytrabajador'])
 def start_worker_registration(message):
     chat_id = message.chat.id
@@ -233,9 +235,6 @@ def handle_worker_location(message):
     send_safe(chat_id, "✅ Ubicación guardada.")
     clear_state(chat_id)
 
-# ==============================
-# CLIENTE - PEDIR SERVICIO
-# ==============================
 @bot.message_handler(commands=['pedirservicio'])
 def request_service(message):
     chat_id = message.chat.id
@@ -370,9 +369,6 @@ def fallback(message):
     else:
         send_safe(message.chat.id, "Estoy esperando algo específico. Usa /cancel si querés reiniciar.")
 
-# ==============================
-# INICIO FINAL PARA RAILWAY
-# ==============================
 if __name__ == "__main__":
     loop = asyncio.get_event_loop()
     try:
