@@ -1,7 +1,7 @@
 import os
 from flask import Flask, request, abort
 from telebot import types, apihelper
-from config import bot  # Asegúrate de que aquí esté: bot = telebot.TeleBot(TOKEN)
+from config import bot
 from models.user_state import set_state, update_data, get_data, clear_state, UserState, get_session
 from models.services_data import SERVICES
 from utils.icons import Icons
@@ -14,16 +14,13 @@ import logging
 
 app = Flask(__name__)
 
-# Logging completo para producción
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Aumentar tiempo de sesión para evitar expiraciones rápidas
-apihelper.SESSION_TIME_TO_LIVE = 10 * 60  # 10 minutos
+apihelper.SESSION_TIME_TO_LIVE = 10 * 60
 
-# -----------------------------
-# ENDPOINT WEBHOOK
-# -----------------------------
+# ==================== WEBHOOK ====================
+
 @app.route('/webhook', methods=['POST'])
 def webhook():
     if request.headers.get('content-type') == 'application/json':
@@ -33,18 +30,14 @@ def webhook():
         return 'OK', 200
     abort(403)
 
-# -----------------------------
-# DEBUG GLOBAL (para saber si recibe mensajes)
-# -----------------------------
+# ==================== DEBUG ====================
+
 @bot.message_handler(func=lambda m: True)
 def debug_all_messages(message):
-    logger.debug(f"[DEBUG MSG] Recibido: '{message.text}' | chat_id: {message.chat.id}")
-    # Comentar esta línea en prod final si no querés respuestas de debug
-    # bot.reply_to(message, f"Debug: Recibí '{message.text}'")
+    logger.debug(f"[DEBUG] Recibido: '{message.text}' | chat_id: {message.chat.id} | estado: {get_session(message.chat.id)}")
 
-# -----------------------------
-# INICIO DEL FLUJO DE TRABAJADOR
-# -----------------------------
+# ==================== FLUJO TRABAJADOR ====================
+
 @bot.message_handler(regexp=r'(?i)(trabajar|prestador|quiero trabajar)')
 def handle_worker_start(message):
     chat_id = message.chat.id
@@ -71,9 +64,8 @@ def start_worker_flow(chat_id: str):
     """
     send_safe(chat_id, welcome_text, get_service_selector([]))
 
-# -----------------------------
-# SELECCIÓN DE SERVICIOS (callback)
-# -----------------------------
+# ==================== SERVICIOS (CALLBACKS) ====================
+
 @bot.callback_query_handler(func=lambda c: c.data.startswith("svc_toggle:"))
 def handle_service_toggle(call):
     chat_id = call.message.chat.id
@@ -122,14 +114,14 @@ def handle_service_confirm(call):
     })
     ask_next_price(chat_id)
 
-# -----------------------------
-# PRECIOS (el resto igual, solo agrego logs)
-# -----------------------------
+# ==================== PRECIOS ====================
+
 def ask_next_price(chat_id: str):
     services = get_data(chat_id, "services_to_price", [])
     idx = get_data(chat_id, "current_service_idx", 0)
     
     if idx >= len(services):
+        # Terminamos con precios, pasar a nombre
         set_state(chat_id, UserState.WORKER_ENTERING_NAME)
         text = f"""
 {Icons.USER} <b>Paso 2/5: Tu nombre</b>
@@ -142,26 +134,170 @@ def ask_next_price(chat_id: str):
         return
     
     service_id = services[idx]
+    service_name = SERVICES.get(service_id, {}).get('name', service_id)
+    
     text = f"""
-{Icons.MONEY} <b>Precio para {SERVICES[service_id]['name']} ({idx+1}/{len(services)})</b>
+{Icons.MONEY} <b>Precio para {service_name} ({idx+1}/{len(services)})</b>
 
-Ingresá tarifa por hora (ej: 8000)
+Ingresá tarifa por hora (solo números, ej: 8000)
     """
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.add(types.KeyboardButton("⏭️ Saltar"))
     markup.add(types.KeyboardButton("❌ Cancelar"))
     bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
 
-# ... (agregá los handlers de price_input, skip, name, phone, dni como en tu versión anterior, con logger.info en cada uno si querés debug)
+@bot.message_handler(func=lambda m: get_session(m.chat.id) and get_session(m.chat.id).state == UserState.WORKER_ENTERING_PRICE)
+def handle_price_input(message):
+    chat_id = message.chat.id
+    text = message.text.strip()
+    
+    logger.info(f"[PRICE] Input: '{text}' | chat_id: {chat_id}")
+    
+    if text == "❌ Cancelar":
+        clear_state(chat_id)
+        bot.send_message(chat_id, "Registro cancelado. Escribí 'trabajar' para reiniciar.", reply_markup=types.ReplyKeyboardRemove())
+        return
+    
+    services = get_data(chat_id, "services_to_price", [])
+    idx = get_data(chat_id, "current_service_idx", 0)
+    
+    if text == "⏭️ Saltar":
+        # Guardar precio como None o 0
+        prices = get_data(chat_id, "prices", {})
+        prices[services[idx]] = None
+        update_data(chat_id, prices=prices, current_service_idx=idx + 1)
+        ask_next_price(chat_id)
+        return
+    
+    # Validar que sea número
+    if not text.isdigit():
+        bot.send_message(chat_id, "❌ Ingresá solo números (ej: 8000)")
+        return
+    
+    price = int(text)
+    prices = get_data(chat_id, "prices", {})
+    prices[services[idx]] = price
+    update_data(chat_id, prices=prices, current_service_idx=idx + 1)
+    
+    bot.send_message(chat_id, f"✅ Precio guardado: ${price}/hora")
+    ask_next_price(chat_id)
 
-# -----------------------------
-# UBICACIÓN FINAL
-# -----------------------------
+# ==================== NOMBRE ====================
+
+@bot.message_handler(func=lambda m: get_session(m.chat.id) and get_session(m.chat.id).state == UserState.WORKER_ENTERING_NAME)
+def handle_name_input(message):
+    chat_id = message.chat.id
+    name = message.text.strip()
+    
+    logger.info(f"[NAME] Input: '{name}' | chat_id: {chat_id}")
+    
+    if name == "❌ Cancelar":
+        clear_state(chat_id)
+        bot.send_message(chat_id, "Registro cancelado.", reply_markup=types.ReplyKeyboardRemove())
+        return
+    
+    if len(name) < 2:
+        bot.send_message(chat_id, "❌ El nombre es muy corto. Intentá de nuevo.")
+        return
+    
+    # Guardar en DB temporal o session
+    update_data(chat_id, worker_name=name)
+    
+    # Pasar a teléfono
+    set_state(chat_id, UserState.WORKER_ENTERING_PHONE)
+    text = f"""
+{Icons.PHONE} <b>Paso 3/5: Teléfono</b>
+
+Ingresá tu número de contacto (ej: 11 1234-5678)
+    """
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add(types.KeyboardButton("❌ Cancelar"))
+    bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
+
+# ==================== TELÉFONO ====================
+
+@bot.message_handler(func=lambda m: get_session(m.chat.id) and get_session(m.chat.id).state == UserState.WORKER_ENTERING_PHONE)
+def handle_phone_input(message):
+    chat_id = message.chat.id
+    phone = message.text.strip()
+    
+    logger.info(f"[PHONE] Input: '{phone}' | chat_id: {chat_id}")
+    
+    if phone == "❌ Cancelar":
+        clear_state(chat_id)
+        bot.send_message(chat_id, "Registro cancelado.", reply_markup=types.ReplyKeyboardRemove())
+        return
+    
+    # Validación básica de teléfono (al menos 8 dígitos)
+    phone_digits = re.sub(r'\D', '', phone)
+    if len(phone_digits) < 8:
+        bot.send_message(chat_id, "❌ Número inválido. Ingresá al menos 8 dígitos.")
+        return
+    
+    update_data(chat_id, worker_phone=phone)
+    
+    # Pasar a DNI
+    set_state(chat_id, UserState.WORKER_ENTERING_DNI)
+    text = f"""
+🆔 <b>Paso 4/5: DNI</b>
+
+Ingresá tu número de documento (sin puntos ni espacios)
+    """
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add(types.KeyboardButton("❌ Cancelar"))
+    bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
+
+# ==================== DNI ====================
+
+@bot.message_handler(func=lambda m: get_session(m.chat.id) and get_session(m.chat.id).state == UserState.WORKER_ENTERING_DNI)
+def handle_dni_input(message):
+    chat_id = message.chat.id
+    dni = message.text.strip()
+    
+    logger.info(f"[DNI] Input: '{dni}' | chat_id: {chat_id}")
+    
+    if dni == "❌ Cancelar":
+        clear_state(chat_id)
+        bot.send_message(chat_id, "Registro cancelado.", reply_markup=types.ReplyKeyboardRemove())
+        return
+    
+    # Validar DNI (7-8 dígitos)
+    dni_clean = re.sub(r'\D', '', dni)
+    if not (7 <= len(dni_clean) <= 8):
+        bot.send_message(chat_id, "❌ DNI inválido. Debe tener 7 u 8 dígitos.")
+        return
+    
+    # Guardar todos los datos en DB
+    name = get_data(chat_id, "worker_name")
+    phone = get_data(chat_id, "worker_phone")
+    prices = get_data(chat_id, "prices", {})
+    selected_services = get_data(chat_id, "selected_services", [])
+    
+    try:
+        db_execute(
+            """UPDATE workers 
+               SET name = ?, phone = ?, dni = ?, services = ?, prices = ? 
+               WHERE chat_id = ?""",
+            (name, phone, dni_clean, ','.join(selected_services), str(prices), str(chat_id)),
+            commit=True
+        )
+        logger.info(f"[DNI] Datos guardados en DB")
+    except Exception as e:
+        logger.error(f"[DNI] Error DB: {e}")
+        bot.send_message(chat_id, "❌ Error al guardar. Intentá de nuevo.")
+        return
+    
+    # Pasar a ubicación
+    set_state(chat_id, UserState.WORKER_SHARING_LOCATION)
+    ask_worker_location(chat_id)
+
+# ==================== UBICACIÓN ====================
+
 def ask_worker_location(chat_id: str):
     text = f"""
 📍 <b>Paso 5/5: Ubicación</b>
 
-Tocá el botón azul abajo o clip > Ubicación.
+Tocá el botón azul abajo o clip > Ubicación para enviar dónde trabajás.
     """
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     markup.add(types.KeyboardButton("📍 Enviar ubicación", request_location=True))
@@ -174,14 +310,10 @@ def handle_worker_location(message):
     logger.info(f"[LOCATION] Recibida | chat_id: {chat_id} | lat: {message.location.latitude}")
 
     session = get_session(chat_id)
-    if not session:
-        logger.warning("[LOCATION] Sesión perdida - forzando estado")
-        set_state(chat_id, UserState.WORKER_SHARING_LOCATION)
-        session = get_session(chat_id)
-
-    if session.state != UserState.WORKER_SHARING_LOCATION:
-        logger.warning(f"[LOCATION] Estado incorrecto: {session.state}")
-        bot.send_message(chat_id, "Estado no esperado. Reiniciá con 'trabajar'.")
+    
+    # Si no hay sesión o no está en el estado correcto, ignorar (puede ser de otro flujo)
+    if not session or session.state != UserState.WORKER_SHARING_LOCATION:
+        logger.warning(f"[LOCATION] Ignorando - estado: {session.state if session else 'None'}")
         return
 
     lat = message.location.latitude
@@ -220,19 +352,18 @@ Comandos útiles:
 /perfil      → Ver tu perfil
 /ayuda       → Soporte
 
-¡A romperla, loco! 💪
+¡A romperla! 💪
     """
     bot.send_message(chat_id, final_text, parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
 
-# -----------------------------
-# SETUP WEBHOOK AL INICIO
-# -----------------------------
+# ==================== INICIO ====================
+
 if __name__ == "__main__":
     PORT = int(os.environ.get('PORT', 8443))
-    # Usa RAILWAY_PUBLIC_DOMAIN o RAILWAY_STATIC_URL según tu plan
     domain = os.environ.get('RAILWAY_PUBLIC_DOMAIN') or os.environ.get('RAILWAY_STATIC_URL')
+    
     if not domain:
-        logger.error("No se encontró dominio en variables de entorno. Setear RAILWAY_PUBLIC_DOMAIN")
+        logger.error("No se encontró dominio en variables de entorno.")
         exit(1)
     
     WEBHOOK_URL = f"https://{domain}/webhook"
