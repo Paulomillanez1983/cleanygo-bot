@@ -3,11 +3,15 @@ from config import bot
 from models.user_state import set_state, update_data, get_data, clear_state, UserState, get_session
 from models.services_data import SERVICES
 from utils.icons import Icons
-from utils.keyboards import get_service_selector, get_location_keyboard
+from utils.keyboards import get_service_selector
 from handlers.common import send_safe
 from database import db_execute
 import re
+import time
 
+# -----------------------------
+# INICIO DEL FLUJO DE TRABAJADOR
+# -----------------------------
 @bot.message_handler(func=lambda m: m.text and ("trabajar" in m.text.lower() or "prestador" in m.text.lower()))
 def handle_worker_start(message):
     start_worker_flow(message.chat.id)
@@ -34,6 +38,9 @@ def start_worker_flow(chat_id: str):
     
     send_safe(chat_id, welcome_text, get_service_selector([]))
 
+# -----------------------------
+# SELECCIÓN DE SERVICIOS
+# -----------------------------
 @bot.callback_query_handler(func=lambda c: c.data.startswith("svc_toggle:"))
 def handle_service_toggle(call):
     chat_id = call.message.chat.id
@@ -65,7 +72,6 @@ def handle_service_confirm(call):
     
     bot.answer_callback_query(call.id, f"✓ {len(selected)} servicios seleccionados")
     
-    # IMPORTANTE: Borrar mensaje con teclado inline para liberar el chat
     try:
         bot.delete_message(chat_id, call.message.message_id)
     except:
@@ -85,6 +91,9 @@ def handle_service_confirm(call):
     
     ask_next_price(chat_id)
 
+# -----------------------------
+# INGRESO DE PRECIOS
+# -----------------------------
 def ask_next_price(chat_id: str):
     """Pide precio para el siguiente servicio"""
     services = get_data(chat_id, "services_to_price", [])
@@ -113,7 +122,6 @@ def ask_next_price(chat_id: str):
 {Icons.INFO} Ingresá solo el número (ej: 5000)
     """
     
-    # Usar ReplyKeyboardMarkup para permitir escritura libre
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     markup.add(types.KeyboardButton("⏭️ Saltar este servicio"))
     
@@ -121,9 +129,7 @@ def ask_next_price(chat_id: str):
 
 @bot.message_handler(func=lambda m: m.text and "Saltar" in m.text and get_session(m.chat.id).state == UserState.WORKER_ENTERING_PRICE)
 def handle_skip_service_text(message):
-    """Handler para saltar servicio con teclado normal"""
     chat_id = message.chat.id
-    
     services = get_data(chat_id, "services_to_price", [])
     idx = get_data(chat_id, "current_service_idx", 0)
     
@@ -139,20 +145,16 @@ def handle_price_input(message):
     chat_id = message.chat.id
     text = message.text.strip()
     
-    # Ignorar si es el botón de saltar (ya lo maneja otro handler)
     if "Saltar" in text:
         return
     
     try:
         price = float(text)
-        if price < 1000:
-            send_safe(chat_id, f"{Icons.WARNING} El precio parece muy bajo. ¿Es correcto? (mínimo $1000)")
-            return
-        if price > 50000:
-            send_safe(chat_id, f"{Icons.WARNING} El precio parece muy alto. ¿Es correcto? (máximo $50000)")
+        if price < 1000 or price > 50000:
+            send_safe(chat_id, f"{Icons.WARNING} Precio fuera de rango (1000-50000)")
             return
     except ValueError:
-        send_safe(chat_id, f"{Icons.ERROR} Por favor ingresá solo números (ej: 5000)")
+        send_safe(chat_id, f"{Icons.ERROR} Ingresá solo números (ej: 5000)")
         return
     
     services = get_data(chat_id, "services_to_price", [])
@@ -163,7 +165,6 @@ def handle_price_input(message):
         return
         
     current_service = services[idx]
-    
     prices = get_data(chat_id, "prices", {})
     prices[current_service] = price
     
@@ -179,6 +180,9 @@ def handle_price_input(message):
     update_data(chat_id, prices=prices, current_service_idx=idx + 1)
     ask_next_price(chat_id)
 
+# -----------------------------
+# INGRESO DE NOMBRE Y TELÉFONO
+# -----------------------------
 @bot.message_handler(func=lambda m: get_session(m.chat.id).state == UserState.WORKER_ENTERING_NAME)
 def handle_name_input(message):
     chat_id = message.chat.id
@@ -198,20 +202,18 @@ Ingresá tu número de teléfono para que los clientes puedan contactarte:
 
 {Icons.INFO} Formato: 11 1234-5678
     """
-    
     bot.send_message(chat_id, text, parse_mode="HTML")
 
 @bot.message_handler(func=lambda m: get_session(m.chat.id).state == UserState.WORKER_ENTERING_PHONE)
 def handle_phone_input(message):
     chat_id = message.chat.id
-    phone = message.text.strip()
+    phone = re.sub(r'\D', '', message.text.strip())
     
-    phone_clean = re.sub(r'\D', '', phone)
-    if len(phone_clean) < 10:
+    if len(phone) < 10:
         send_safe(chat_id, f"{Icons.WARNING} Número inválido. Ingresá al menos 10 dígitos.")
         return
     
-    update_data(chat_id, worker_phone=phone_clean)
+    update_data(chat_id, worker_phone=phone)
     set_state(chat_id, UserState.WORKER_UPLOADING_DNI)
     
     text = f"""
@@ -221,9 +223,11 @@ Para la seguridad de todos, necesitamos verificar tu identidad.
 
 {Icons.INFO} Enviá una foto de tu DNI (frente o reverso)
     """
-    
     bot.send_message(chat_id, text, parse_mode="HTML")
 
+# -----------------------------
+# SUBIDA DE DNI
+# -----------------------------
 @bot.message_handler(content_types=['photo'], 
                     func=lambda m: get_session(m.chat.id).state == UserState.WORKER_UPLOADING_DNI)
 def handle_dni_upload(message):
@@ -240,29 +244,37 @@ def handle_dni_upload(message):
     )
     
     set_state(chat_id, UserState.WORKER_SHARING_LOCATION)
-    
+    ask_worker_location(chat_id)
+
+# -----------------------------
+# PEDIR UBICACIÓN CON BOTÓN NATIVO
+# -----------------------------
+def ask_worker_location(chat_id: str):
     text = f"""
 {Icons.LOCATION} <b>Paso 5/5: Ubicación de trabajo</b>
 
-¿Dónde trabajás? 
-
-{Icons.INFO} Enviá tu ubicación para recibir avisos de trabajos cercanos.
-{Icons.INFO} Podés actualizarla cuando quieras con /ubicacion
-    """
+Enviá tu ubicación para recibir avisos de trabajos cercanos.
+Podés actualizarla cuando quieras con /ubicacion
+"""
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    markup.add(types.KeyboardButton("📍 Enviar mi ubicación", request_location=True))
+    markup.add(types.KeyboardButton("❌ Cancelar"))
     
-    send_safe(chat_id, text, get_location_keyboard())
+    bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
+
+# -----------------------------
+# HANDLER DE UBICACIÓN
+# -----------------------------
 @bot.message_handler(content_types=['location'])
 def handle_worker_location(message):
     chat_id = message.chat.id
     session = get_session(chat_id)
 
-    # Solo procesar si estamos en el flujo de registro
     if not session or str(session.state) != str(UserState.WORKER_SHARING_LOCATION):
         return
 
-    # Telegram puede enviar location en distintos formatos; tomamos siempre .location
     if not hasattr(message, "location") or not message.location:
-        bot.send_message(chat_id, f"{Icons.ERROR} No se pudo detectar tu ubicación. Intentá usar el botón o enviarla desde el mapa.")
+        bot.send_message(chat_id, f"{Icons.ERROR} No se pudo detectar tu ubicación. Intentá usar el botón nativo de Telegram.")
         return
 
     lat = message.location.latitude
@@ -271,4 +283,34 @@ def handle_worker_location(message):
     try:
         process_worker_location(chat_id, lat, lon)
     except:
-        bot.send_message(chat_id, f"{Icons.ERROR} Error al guardar tu ubicación. Intentá nuevamente o escribí /cancel")Intentá nuevamente o escribí /cancel")
+        bot.send_message(chat_id, f"{Icons.ERROR} Error al guardar tu ubicación. Intentá nuevamente o escribí /cancel")
+
+# -----------------------------
+# PROCESAR UBICACIÓN
+# -----------------------------
+def process_worker_location(chat_id: str, lat: float, lon: float):
+    """Procesa y guarda la ubicación del trabajador"""
+    timestamp = int(time.time())
+    db_execute(
+        "UPDATE workers SET lat = ?, lon = ?, last_update = ?, disponible = 1 WHERE chat_id = ?",
+        (lat, lon, timestamp, str(chat_id)),
+        commit=True
+    )
+    clear_state(chat_id)
+
+    # Mensaje final con teclado removido
+    markup = types.ReplyKeyboardRemove()
+    success_text = f"""
+{Icons.PARTY} <b>¡Registro completado!</b>
+
+Ya estás activo y recibirás notificaciones de trabajos cercanos.
+
+<b>Tus comandos:</b>
+/online - Activar disponibilidad
+/offline - Pausar notificaciones  
+/ubicacion - Actualizar ubicación
+/precios - Modificar tarifas
+/perfil - Ver tu perfil
+/ayuda - Ayuda y soporte
+    """
+    bot.send_message(chat_id, success_text, reply_markup=markup, parse_mode="HTML")
