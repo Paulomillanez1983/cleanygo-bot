@@ -35,7 +35,7 @@ def haversine(lat1, lon1, lat2, lon2):
     return R * c
 
 # ==============================
-# 🔹 Registro trabajador
+# 🔹 Registro trabajador y precios
 # ==============================
 @bot.message_handler(commands=['soytrabajador'])
 def start_worker_registration(message):
@@ -144,7 +144,7 @@ def update_worker_location(message):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     markup.add(types.KeyboardButton("📍 Enviar ubicación", request_location=True))
     send_safe(chat_id, "📍 Por favor enviá tu ubicación actual:", markup)
-    clients[chat_id] = {"estado": "actualizando_ubicacion"}
+    clients[chat_id]["estado"] = "actualizando_ubicacion"
 
 @bot.message_handler(content_types=['location'], func=lambda m: clients.get(m.chat.id, {}).get("estado")=="actualizando_ubicacion")
 def handle_worker_location(message):
@@ -195,11 +195,8 @@ def handle_client_hora(message):
         send_safe(chat_id, "❌ Formato inválido. Ingresá la hora como HH:MM")
         return
     clients[chat_id]["pedido"]["hora"] = hora
-
     pedido = clients[chat_id]["pedido"]
     ubic_cliente = pedido["ubicacion"]
-
-    # Confirmación tipo tarjeta
     markup_confirm = types.InlineKeyboardMarkup()
     markup_confirm.add(types.InlineKeyboardButton("✅ Confirmar pedido", callback_data="confirmar_pedido"))
     send_safe(chat_id,
@@ -209,22 +206,31 @@ def handle_client_hora(message):
               f"Ubicación: {ubic_cliente['lat']}, {ubic_cliente['lon']}\n"
               f"Mapa: <a href='https://www.google.com/maps/search/?api=1&query={ubic_cliente['lat']},{ubic_cliente['lon']}'>Ver en mapa</a>",
               markup_confirm)
-
     clients[chat_id]["estado"] = "confirmando_pedido"
 
 # ==============================
-# 🔹 Reintentos automáticos para enviar pedido
+# 🔹 Enviar pedido con reintentos + urgencia + mini-mapa
 # ==============================
 def enviar_pedido_con_reintentos(client_id, pedido, radio_inicial=5, max_radio=20, incremento=5, espera_segundos=30):
     radio_km = radio_inicial
+    start_time = time.time()
+    alerta_urgencia_enviada = False
+
     while clients.get(client_id, {}).get("pedido_abierto", False) and radio_km <= max_radio:
         found = False
+        map_markers = []
+
         for worker_id, worker_data in workers.items():
-            if pedido["servicio"] in worker_data["servicios"] and worker_data.get("disponible") and "ubicacion" in worker_data:
+            if (pedido["servicio"] in worker_data["servicios"] and
+                worker_data.get("disponible") and
+                worker_data.get("ubicacion", {}).get("lat") and
+                worker_data.get("ubicacion", {}).get("lon")):
+
                 distancia = haversine(pedido["ubicacion"]["lat"], pedido["ubicacion"]["lon"],
                                       worker_data["ubicacion"]["lat"], worker_data["ubicacion"]["lon"])
                 if distancia <= radio_km:
                     found = True
+                    map_markers.append(f"{worker_data['ubicacion']['lat']},{worker_data['ubicacion']['lon']}")
                     markup_worker = types.InlineKeyboardMarkup()
                     markup_worker.add(types.InlineKeyboardButton("✅ Aceptar", callback_data=f"aceptar_{client_id}"))
                     markup_worker.add(types.InlineKeyboardButton("❌ Rechazar", callback_data=f"rechazar_{client_id}"))
@@ -235,6 +241,20 @@ def enviar_pedido_con_reintentos(client_id, pedido, radio_inicial=5, max_radio=2
                               f"Ubicación: {pedido['ubicacion']['lat']}, {pedido['ubicacion']['lon']}\n"
                               f"<a href='https://www.google.com/maps/search/?api=1&query={pedido['ubicacion']['lat']},{pedido['ubicacion']['lon']}'>Ver en mapa</a>",
                               markup_worker)
+
+        if map_markers:
+            base_url = "https://www.google.com/maps/dir/"
+            map_url = base_url + "/".join(map_markers + [f"{pedido['ubicacion']['lat']},{pedido['ubicacion']['lon']}"])
+            send_safe(client_id, f"🗺️ Trabajadores cercanos visualizados en mapa:\n{map_url}")
+
+        if not alerta_urgencia_enviada and time.time() - start_time > 60:
+            for worker_id, worker_data in workers.items():
+                if pedido["servicio"] in worker_data["servicios"]:
+                    send_safe(worker_id,
+                              f"‼️ <b>URGENTE</b> ‼️\nPedido '{pedido['servicio']}' sin aceptación en 60s.\n"
+                              f"<a href='https://www.google.com/maps/search/?api=1&query={pedido['ubicacion']['lat']},{pedido['ubicacion']['lon']}'>Ver ubicación</a>")
+            alerta_urgencia_enviada = True
+
         if found:
             break
         else:
@@ -250,11 +270,14 @@ def enviar_pedido_con_reintentos(client_id, pedido, radio_inicial=5, max_radio=2
 @bot.callback_query_handler(func=lambda call: call.data=="confirmar_pedido")
 def confirm_pedido(call):
     chat_id = call.message.chat.id
-    pedido = clients[chat_id]["pedido"]
+    if chat_id not in clients:
+        send_safe(chat_id, "❌ Error interno: cliente no registrado.")
+        return
+    pedido = clients[chat_id]["pedido"].copy()
     clients[chat_id]["pedido_abierto"] = True
-    threading.Thread(target=enviar_pedido_con_reintentos, args=(chat_id, pedido)).start()
-    send_safe(chat_id, "✅ Pedido enviado a los prestadores cercanos. Esperá que acepten.")
     clients[chat_id]["estado"] = "buscando_prestador"
+    threading.Thread(target=enviar_pedido_con_reintentos, args=(chat_id, pedido), daemon=True).start()
+    send_safe(chat_id, "✅ Pedido enviado a los prestadores cercanos. Esperá que acepten.")
 
 # ==============================
 # 🔹 Trabajador acepta/rechaza pedido
@@ -279,7 +302,6 @@ def handle_worker_response(call):
         send_safe(worker_id, "🎉 Tomaste el trabajo. Contactá al cliente para coordinar.")
         send_safe(client_id, f"✅ Tu prestador ha aceptado el servicio '{clients[client_id]['pedido']['servicio']}'. Contactá para coordinar.")
 
-        # Notificar a otros trabajadores
         for w_id, w_data in workers.items():
             if w_id != worker_id and w_data.get("disponible"):
                 send_safe(w_id, f"⚠️ Pedido '{clients[client_id]['pedido']['servicio']}' ya fue tomado por otro trabajador.")
