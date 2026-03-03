@@ -428,4 +428,6 @@ if __name__ == "__main__":
     logger.info("🤖 Bot iniciado correctamente")
     print("🤖 Bot corriendo...")
 
+    logger.info("Iniciando polling...")  # ← nuevo log
     bot.infinity_polling(timeout=30, long_polling_timeout=30, skip_pending=True)
+    logger.info("Polling terminado (no debería llegar acá)")  # ← nunca debería verse
