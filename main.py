@@ -231,11 +231,17 @@ def show_loading(chat_id, text="Procesando..."):
     markup.add(types.InlineKeyboardButton(f"{Icons.PENDING} {text}", callback_data="loading"))
     return send_safe(chat_id, f"<i>{Icons.PENDING} {text}</i>", markup)
 
-def remove_keyboard(chat_id, text=""):
-    """Elimina el teclado de manera limpia"""
-    markup = types.ReplyKeyboardRemove()
-    return send_safe(chat_id, text, markup)
-
+def remove_keyboard(chat_id, text=None):
+    """Elimina el teclado reply sin enviar mensaje vacío"""
+    markup = types.ReplyKeyboardRemove(selective=False)
+    
+    if text and text.strip():  # solo envía si hay texto real
+        return send_safe(chat_id, text, markup)
+    else:
+        # Si no hay texto → enviamos un mensaje dummy mínimo o simplemente no hacemos nada
+        # Opción más segura: no enviar nada (el teclado se quita igual en el próximo mensaje)
+        logger.debug(f"remove_keyboard llamado sin texto para {chat_id} → omitiendo envío vacío")
+        return None
 def haversine(lat1, lon1, lat2, lon2):
     R = 6371
     phi1, phi2 = math.radians(lat1), math.radians(lat2)
