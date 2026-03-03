@@ -271,7 +271,7 @@ def handle_worker_location(message):
     chat_id = message.chat.id
     session = get_session(chat_id)
 
-    # Solo procesar si estamos en flujo de registro
+    # Validar que estemos en flujo de registro
     if not session or session.state != UserState.WORKER_SHARING_LOCATION:
         return
 
@@ -281,21 +281,22 @@ def handle_worker_location(message):
 
     lat, lon = message.location.latitude, message.location.longitude
 
-    # 1️⃣ Guardar ubicación y limpiar estado
+    # Guardar ubicación y marcar disponible
     timestamp = int(time.time())
     db_execute(
         "UPDATE workers SET lat = ?, lon = ?, last_update = ?, disponible = 1 WHERE chat_id = ?",
         (lat, lon, timestamp, str(chat_id)),
         commit=True
     )
+
+    # Limpiar estado de flujo
     clear_state(chat_id)
 
-    # 2️⃣ Mensaje inmediato de confirmación
-    bot.send_message(chat_id, "✅ Ubicación recibida correctamente", reply_markup=types.ReplyKeyboardRemove())
-
-    # 3️⃣ Mensaje final con todos los comandos, teclado limpio
+    # Mensaje final único, con teclado limpio y confirmación
     final_text = f"""
 🎉 <b>¡Registro completado!</b>
+
+✅ Ubicación recibida correctamente.
 
 Ya estás activo y recibirás notificaciones de trabajos cercanos.
 
