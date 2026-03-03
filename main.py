@@ -13,6 +13,7 @@ DB_FILE = "services_bot.db"
 
 bot = telebot.TeleBot(TOKEN)
 
+# Logging solo a consola (Railway lo lee)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -373,12 +374,13 @@ if __name__ == "__main__":
     loop = asyncio.get_event_loop()
     try:
         loop.run_until_complete(init_db())
+        logger.info("✅ DB OK")
     except Exception as e:
-        logger.error(f"❌ Error DB: {e}")
-        print(f"❌ Error DB: {e}")
+        logger.error(f"Error DB: {e}")
+        print(f"Error DB: {e}")
         raise
 
-    logger.info("🤖 Bot iniciado correctamente en Railway")
+    logger.info("🤖 Bot iniciado correctamente")
     print("🤖 Bot corriendo...")
 
     bot.infinity_polling(timeout=30, long_polling_timeout=30, skip_pending=True)
