@@ -3,20 +3,21 @@
   "build": {
     "builder": "NIXPACKS",
     "nixpacksPlan": {
+      "providers": ["python"],
       "phases": {
         "setup": {
           "nixPkgs": ["python311", "gcc"]
         },
         "build": {
-          "cmds": ["pip install -r requirements.txt"]  // Agregá esto para que instale telebot y deps
+          "cmds": ["pip install --no-cache-dir -r requirements.txt"]
         }
       }
     }
   },
   "deploy": {
-    "startCommand": "python bot.py",
-    "restartPolicyType": "ALWAYS",  // Cambié a ALWAYS para retry infinito
-    "restartPolicyMaxRetries": 10,
-    "sleepApplication": false  // No duerme el container
+    "startCommand": "python bot.py",  // o el nombre exacto de tu archivo principal (donde está if __name__ == "__main__")
+    "restartPolicyType": "ALWAYS",
+    "restartPolicyMaxRetries": -1,  // infinito
+    "sleepApplication": false
   }
 }
