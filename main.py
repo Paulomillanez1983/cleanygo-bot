@@ -4,11 +4,9 @@ import re
 import math
 import threading
 import time
-import os
 import logging
 import aiosqlite
 import asyncio
-from datetime import datetime, timedelta
 
 # ==============================
 # Configuración básica
@@ -18,14 +16,11 @@ DB_FILE = "services_bot.db"
 
 bot = telebot.TeleBot(TOKEN)
 
-# Logging decente (archivo + consola)
+# Logging optimizado para Railway (solo stdout)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler("bot.log", encoding='utf-8'),
-        logging.StreamHandler()
-    ]
+    handlers=[logging.StreamHandler()]
 )
 logger = logging.getLogger(__name__)
 
@@ -37,7 +32,7 @@ services_list = [
 ]
 
 # ==============================
-# Inicializar base de datos (SQLite)
+# DB
 # ==============================
 async def init_db():
     async with aiosqlite.connect(DB_FILE) as db:
@@ -69,21 +64,15 @@ async def init_db():
                 hora TEXT,
                 lat REAL NOT NULL,
                 lon REAL NOT NULL,
-                status TEXT DEFAULT 'open',  -- open, accepted, completed, cancelled, expired
+                status TEXT DEFAULT 'open',
                 worker_chat_id TEXT,
                 created_at INTEGER DEFAULT (strftime('%s', 'now')),
                 updated_at INTEGER DEFAULT (strftime('%s', 'now'))
             )
         ''')
         await db.commit()
-    logger.info("Base de datos SQLite inicializada")
+    logger.info("✅ Base de datos SQLite inicializada correctamente")
 
-# Ejecutar init al arrancar (síncrono para compatibilidad con telebot)
-asyncio.run(init_db())
-
-# ==============================
-# Helpers asíncronos
-# ==============================
 async def db_execute(query, params=(), fetch_one=False, commit=False):
     async with aiosqlite.connect(DB_FILE) as db:
         cursor = await db.execute(query, params)
@@ -97,7 +86,7 @@ def send_safe(chat_id, text, reply_markup=None):
     try:
         bot.send_message(chat_id, text, reply_markup=reply_markup, parse_mode="HTML")
     except Exception as e:
-        logger.error(f"Error enviando mensaje a {chat_id}: {e}")
+        logger.error(f"Error enviando a {chat_id}: {e}")
 
 def haversine(lat1, lon1, lat2, lon2):
     R = 6371
@@ -117,9 +106,9 @@ def is_valid_price(text):
         return False
 
 # ==============================
-# Estados del usuario (en memoria por simplicidad, pero con DB principal)
+# Estados del usuario
 # ==============================
-user_states = {}  # chat_id -> {"state": "...", "data": {...}}
+user_states = {}
 
 def set_state(chat_id, state, data=None):
     user_states[str(chat_id)] = {"state": state, "data": data or {}}
@@ -140,12 +129,7 @@ def start_worker_registration(message):
         send_safe(chat_id, "Ya estás en otro proceso. Usa /cancel primero.")
         return
 
-    # Chequear si ya existe
-    exists = asyncio.run(db_execute(
-        "SELECT 1 FROM workers WHERE chat_id = ?",
-        (str(chat_id),), fetch_one=True
-    ))
-
+    exists = asyncio.run(db_execute("SELECT 1 FROM workers WHERE chat_id = ?", (str(chat_id),), fetch_one=True))
     if not exists:
         asyncio.run(db_execute(
             "INSERT OR IGNORE INTO workers (chat_id, disponible, last_update) VALUES (?, 1, ?)",
@@ -186,20 +170,15 @@ def handle_service_selection(call):
         else:
             selected.append(service)
             bot.answer_callback_query(call.id, f"✅ {service} agregado")
-
-        ask_services_worker(chat_id)  # refrescar teclado
+        ask_services_worker(chat_id)
     elif data == "confirm_services":
         if not selected:
             bot.answer_callback_query(call.id, "Debes seleccionar al menos un servicio")
             return
-
         bot.answer_callback_query(call.id, "Servicios confirmados")
         send_safe(chat_id, f"Servicios seleccionados: {', '.join(selected)}")
 
-        set_state(chat_id, "ingresando_precios", {
-            "services": selected[:],
-            "current_index": 0
-        })
+        set_state(chat_id, "ingresando_precios", {"services": selected[:], "current_index": 0})
         ask_price_worker(chat_id)
 
 def ask_price_worker(chat_id):
@@ -234,7 +213,6 @@ def handle_worker_price(message):
     ))
 
     send_safe(chat_id, f"💰 Precio de '{service}': ${price}")
-
     state["data"]["current_index"] += 1
     ask_price_worker(chat_id)
 
@@ -246,11 +224,7 @@ def handle_worker_name(message):
         send_safe(chat_id, "El nombre debe tener al menos 3 letras.")
         return
 
-    asyncio.run(db_execute(
-        "UPDATE workers SET nombre = ? WHERE chat_id = ?",
-        (nombre, str(chat_id)), commit=True
-    ))
-
+    asyncio.run(db_execute("UPDATE workers SET nombre = ? WHERE chat_id = ?", (nombre, str(chat_id)), commit=True))
     send_safe(chat_id, "📄 Ahora enviá foto del DNI (frontal)")
     set_state(chat_id, "dni_worker")
 
@@ -270,23 +244,13 @@ def handle_worker_dni(message):
 @bot.message_handler(commands=['offline'])
 def go_offline(message):
     chat_id = message.chat.id
-    exists = asyncio.run(db_execute(
-        "SELECT 1 FROM workers WHERE chat_id = ?",
-        (str(chat_id),), fetch_one=True
-    ))
+    exists = asyncio.run(db_execute("SELECT 1 FROM workers WHERE chat_id = ?", (str(chat_id),), fetch_one=True))
     if not exists:
         send_safe(chat_id, "No estás registrado como trabajador.")
         return
-
-    asyncio.run(db_execute(
-        "UPDATE workers SET disponible = 0 WHERE chat_id = ?",
-        (str(chat_id),), commit=True
-    ))
+    asyncio.run(db_execute("UPDATE workers SET disponible = 0 WHERE chat_id = ?", (str(chat_id),), commit=True))
     send_safe(chat_id, "🛑 Estás fuera de línea.")
 
-# ==============================
-# Actualizar ubicación
-# ==============================
 @bot.message_handler(commands=['actualizarubicacion'])
 def update_worker_location(message):
     chat_id = message.chat.id
@@ -397,9 +361,8 @@ def buscar_prestadores(client_id, pedido, radio_inicial=5, max_radio=30, increme
     radio = radio_inicial
     start = time.time()
     urgencia_enviada = False
-    pedido_id = None  # Podríamos guardar el ID si queremos expirar
 
-    while time.time() - start < 900:  # 15 min máximo
+    while time.time() - start < 900:
         found = False
         workers_near = []
 
@@ -421,28 +384,21 @@ def buscar_prestadores(client_id, pedido, radio_inicial=5, max_radio=30, increme
         if found:
             for w_id, dist, lat, lon in workers_near:
                 markup = types.InlineKeyboardMarkup()
-                markup.add(
-                    types.InlineKeyboardButton("✅ Aceptar", callback_data=f"aceptar_{client_id}"),
-                    types.InlineKeyboardButton("❌ Rechazar", callback_data=f"rechazar_{client_id}")
-                )
-                send_safe(w_id, f"🚨 Pedido cerca ({dist:.1f} km)!\n"
-                               f"Servicio: {pedido['servicio']}\nHora: {pedido['hora']}\n"
-                               f"<a href='https://maps.google.com/?q={pedido['ubicacion']['lat']},{pedido['ubicacion']['lon']}'>Ver mapa</a>",
-                               markup)
+                markup.add(types.InlineKeyboardButton("✅ Aceptar", callback_data=f"aceptar_{client_id}"))
+                markup.add(types.InlineKeyboardButton("❌ Rechazar", callback_data=f"rechazar_{client_id}"))
+                send_safe(w_id, f"🚨 Pedido cerca ({dist:.1f} km)!\nServicio: {pedido['servicio']}\nHora: {pedido['hora']}\n<a href='https://maps.google.com/?q={pedido['ubicacion']['lat']},{pedido['ubicacion']['lon']}'>Ver mapa</a>", markup)
 
             send_safe(client_id, "Encontramos prestadores cercanos. Esperando respuesta...")
-            return  # Salimos cuando encontramos
+            return
 
         if not urgencia_enviada and time.time() - start > 90:
-            # Enviar alerta urgente a TODOS los que hacen ese servicio
             urgencia_enviada = True
             urg_rows = asyncio.run(db_execute(
                 "SELECT DISTINCT w.chat_id FROM workers w JOIN worker_services ws ON w.chat_id = ws.chat_id WHERE ws.servicio = ?",
                 (pedido["servicio"],)
             ))
             for (w_id,) in urg_rows:
-                send_safe(w_id, f"‼️ URGENTE ‼️\nPedido de {pedido['servicio']} sin respuesta.\n"
-                               f"<a href='https://maps.google.com/?q={pedido['ubicacion']['lat']},{pedido['ubicacion']['lon']}'>Ver ubicación</a>")
+                send_safe(w_id, f"‼️ URGENTE ‼️\nPedido de {pedido['servicio']} sin respuesta.\n<a href='https://maps.google.com/?q={pedido['ubicacion']['lat']},{pedido['ubicacion']['lon']}'>Ver ubicación</a>")
 
         time.sleep(espera)
         radio += incremento
@@ -450,7 +406,7 @@ def buscar_prestadores(client_id, pedido, radio_inicial=5, max_radio=30, increme
     send_safe(client_id, "No encontramos prestadores disponibles ahora. Intenta más tarde o con /pedirservicio de nuevo.")
 
 # ==============================
-# Aceptar / Rechazar (trabajador)
+# Aceptar / Rechazar
 # ==============================
 @bot.callback_query_handler(func=lambda call: call.data.startswith(("aceptar_", "rechazar_")))
 def handle_worker_response(call):
@@ -458,30 +414,19 @@ def handle_worker_response(call):
     action, client_id = call.data.split("_", 1)
     client_id = str(client_id)
 
-    # Muy básico: asumimos que el primero que acepta lo toma (sin lock por ahora)
     if action == "aceptar":
-        # Marcar no disponible
-        asyncio.run(db_execute(
-            "UPDATE workers SET disponible = 0 WHERE chat_id = ?",
-            (worker_id,), commit=True
-        ))
-
+        asyncio.run(db_execute("UPDATE workers SET disponible = 0 WHERE chat_id = ?", (worker_id,), commit=True))
         send_safe(worker_id, "🎉 Tomaste el pedido. Contactá al cliente.")
-        send_safe(client_id, "¡Un prestador aceptó tu pedido! Te llegará su contacto pronto.")
-
-        # Enviar confirmación al cliente (simplificado)
+        send_safe(client_id, "¡Un prestador aceptó tu pedido!")
         markup = types.InlineKeyboardMarkup()
-        markup.add(
-            types.InlineKeyboardButton("✅ Recibí el servicio", callback_data=f"cliente_ok_{worker_id}"),
-            types.InlineKeyboardButton("❌ Problema", callback_data=f"cliente_no_{worker_id}")
-        )
-        send_safe(client_id, f"El prestador está en camino para {get_state(client_id).get('data', {}).get('servicio', 'el servicio')}.", markup)
-
+        markup.add(types.InlineKeyboardButton("✅ Recibí el servicio", callback_data=f"cliente_ok_{worker_id}"))
+        markup.add(types.InlineKeyboardButton("❌ Problema", callback_data=f"cliente_no_{worker_id}"))
+        send_safe(client_id, f"El prestador está en camino.", markup)
     else:
         send_safe(worker_id, "Rechazaste el pedido.")
 
 # ==============================
-# Cancelar proceso
+# Cancelar y comandos básicos
 # ==============================
 @bot.message_handler(commands=['cancel'])
 def cancel_process(message):
@@ -490,9 +435,6 @@ def cancel_process(message):
     clear_state(chat_id)
     send_safe(chat_id, "Proceso cancelado." if old_state != "idle" else "No había proceso activo.")
 
-# ==============================
-# Start y fallback
-# ==============================
 @bot.message_handler(commands=['start'])
 def start_command(message):
     send_safe(message.chat.id, "👋 Bienvenido!\n\n"
@@ -509,9 +451,18 @@ def fallback(message):
         send_safe(message.chat.id, "Estoy esperando algo específico. Usa /cancel si querés reiniciar.")
 
 # ==============================
-# Inicio
+# INICIO FINAL PARA RAILWAY
 # ==============================
 if __name__ == "__main__":
-    logger.info("Bot iniciado")
+    loop = asyncio.get_event_loop()
+    try:
+        loop.run_until_complete(init_db())
+    except Exception as e:
+        logger.error(f"❌ Error DB: {e}")
+        print(f"❌ Error DB: {e}")
+        raise
+
+    logger.info("🤖 Bot iniciado correctamente en Railway")
     print("🤖 Bot corriendo...")
-    bot.infinity_polling(timeout=30, long_polling_timeout=30)
+
+    bot.infinity_polling(timeout=30, long_polling_timeout=30, skip_pending=True)
