@@ -256,19 +256,25 @@ def handle_dni_upload(message):
                     func=lambda m: get_session(m.chat.id).state == UserState.WORKER_SHARING_LOCATION)
 def handle_worker_location(message):
     chat_id = message.chat.id
-    lat = message.location.latitude
-    lon = message.location.longitude
     
-    import time
-    db_execute(
-        "UPDATE workers SET lat = ?, lon = ?, last_update = ?, disponible = 1 WHERE chat_id = ?",
-        (lat, lon, int(time.time()), str(chat_id)),
-        commit=True
-    )
-    
-    clear_state(chat_id)
-    
-    success_text = f"""
+    try:
+        lat = message.location.latitude
+        lon = message.location.longitude
+        
+        import time
+        db_execute(
+            "UPDATE workers SET lat = ?, lon = ?, last_update = ?, disponible = 1 WHERE chat_id = ?",
+            (lat, lon, int(time.time()), str(chat_id)),
+            commit=True
+        )
+        
+        clear_state(chat_id)
+        
+        # IMPORTANTE: Eliminar el teclado de ubicación primero
+        from handlers.common import remove_keyboard
+        remove_keyboard(chat_id, "✅ Ubicación guardada")
+        
+        success_text = f"""
 {Icons.PARTY} <b>¡Registro completado!</b>
 
 Ya estás activo y recibirás notificaciones de trabajos cercanos.
@@ -280,6 +286,11 @@ Ya estás activo y recibirás notificaciones de trabajos cercanos.
 /precios - Modificar tarifas
 /perfil - Ver tu perfil
 /ayuda - Ayuda y soporte
-    """
-    
-    bot.send_message(chat_id, success_text, parse_mode="HTML")
+        """
+        
+        bot.send_message(chat_id, success_text, parse_mode="HTML")
+        
+    except Exception as e:
+        from config import logger
+        logger.error(f"Error en handle_worker_location: {e}")
+        bot.send_message(chat_id, f"{Icons.ERROR} Error al guardar ubicación. Intentá de nuevo.")
