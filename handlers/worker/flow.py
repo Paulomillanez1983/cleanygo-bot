@@ -252,36 +252,80 @@ def handle_dni_upload(message):
     
     send_safe(chat_id, text, get_location_keyboard())
 
-@bot.message_handler(content_types=['location'], 
-                    func=lambda m: get_session(m.chat.id).state == UserState.WORKER_SHARING_LOCATION)
-def handle_worker_location(message):
+@bot.message_handler(content_types=['location'])
+def handle_any_location(message):
+    """
+    Handler universal para ubicaciones.
+    Verifica el estado manualmente para debug.
+    """
     from config import logger
     
     chat_id = message.chat.id
-    logger.info(f"=== WORKER LOCATION RECIBIDA === chat_id: {chat_id}")
-    logger.info(f"Location: lat={message.location.latitude}, lon={message.location.longitude}")
-    logger.info(f"Estado actual: {get_session(chat_id).state}")
+    lat = message.location.latitude
+    lon = message.location.longitude
     
+    logger.info(f"📍 LOCATION RECIBIDA: chat_id={chat_id}, lat={lat}, lon={lon}")
+    
+    # Obtener estado actual
     try:
-        lat = message.location.latitude
-        lon = message.location.longitude
-        
-        import time
+        session = get_session(chat_id)
+        current_state = session.state if session else "NO_SESSION"
+        logger.info(f"📍 ESTADO ACTUAL: {current_state}")
+    except Exception as e:
+        logger.error(f"📍 ERROR obteniendo sesión: {e}")
+        current_state = "ERROR"
+    
+    # Solo procesar si está en el estado correcto
+    if current_state != UserState.WORKER_SHARING_LOCATION:
+        logger.info(f"📍 Ignorando ubicación, estado es {current_state}, no WORKER_SHARING_LOCATION")
+        return
+    
+    # Procesar ubicación
+    try:
+        process_worker_location(chat_id, lat, lon)
+    except Exception as e:
+        logger.error(f"📍 ERROR en process_worker_location: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        bot.send_message(chat_id, f"{Icons.ERROR} Error al guardar. Intentá de nuevo o escribí /cancel")
+
+def process_worker_location(chat_id: str, lat: float, lon: float):
+    """Procesa y guarda la ubicación del trabajador"""
+    from config import logger
+    import time
+    
+    logger.info(f"🔄 Procesando ubicación para {chat_id}: {lat}, {lon}")
+    
+    # 1. Guardar en DB
+    try:
         result = db_execute(
             "UPDATE workers SET lat = ?, lon = ?, last_update = ?, disponible = 1 WHERE chat_id = ?",
             (lat, lon, int(time.time()), str(chat_id)),
             commit=True
         )
-        logger.info(f"DB update result: {result}")
-        
+        logger.info(f"✅ DB actualizada: {result}")
+    except Exception as e:
+        logger.error(f"❌ ERROR DB: {e}")
+        raise
+    
+    # 2. Limpiar estado
+    try:
         clear_state(chat_id)
-        logger.info(f"Estado limpiado para {chat_id}")
-        
-        # Eliminar teclado
-        from handlers.common import remove_keyboard
-        remove_keyboard(chat_id, "✅ Ubicación guardada")
-        logger.info(f"Teclado removido para {chat_id}")
-        
+        logger.info(f"✅ Estado limpiado")
+    except Exception as e:
+        logger.error(f"❌ ERROR limpiando estado: {e}")
+        raise
+    
+    # 3. Eliminar teclado
+    try:
+        remove_keyboard(chat_id, "✅ ¡Ubicación guardada!")
+        logger.info(f"✅ Teclado removido")
+    except Exception as e:
+        logger.error(f"❌ ERROR removiendo teclado: {e}")
+        # Continuar igual
+    
+    # 4. Enviar mensaje de éxito
+    try:
         success_text = f"""
 {Icons.PARTY} <b>¡Registro completado!</b>
 
@@ -295,12 +339,8 @@ Ya estás activo y recibirás notificaciones de trabajos cercanos.
 /perfil - Ver tu perfil
 /ayuda - Ayuda y soporte
         """
-        
         bot.send_message(chat_id, success_text, parse_mode="HTML")
-        logger.info(f"Mensaje de éxito enviado a {chat_id}")
-        
+        logger.info(f"✅ Mensaje de éxito enviado a {chat_id}")
     except Exception as e:
-        logger.error(f"ERROR en handle_worker_location: {e}")
-        import traceback
-        logger.error(traceback.format_exc())
-        bot.send_message(chat_id, f"{Icons.ERROR} Error: {str(e)}")
+        logger.error(f"❌ ERROR enviando mensaje final: {e}")
+        raise
