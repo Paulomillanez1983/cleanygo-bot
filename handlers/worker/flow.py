@@ -6,7 +6,7 @@ from models.user_state import set_state, update_data, get_data, clear_state, Use
 from models.services_data import SERVICES
 from utils.icons import Icons
 from utils.keyboards import get_service_selector
-from handlers.common import send_safe
+from handlers.common import send_safe, edit_safe  # <-- IMPORTAR AQUÍ ARRIBA
 from database import db_execute
 import re
 import time
@@ -86,7 +86,7 @@ def handle_service_toggle(call):
         bot.answer_callback_query(call.id, f"✅ {SERVICES[service_id]['name']} agregado")
     
     update_data(chat_id, selected_services=selected)
-    from handlers.common import edit_safe
+    # USAR edit_safe IMPORTADO ARRIBA
     edit_safe(chat_id, call.message.message_id, call.message.text, get_service_selector(selected))
 
 @bot.callback_query_handler(func=lambda c: c.data == "svc_confirm")
@@ -219,7 +219,7 @@ def handle_name_input(message):
     # Pasar a teléfono
     set_state(chat_id, UserState.WORKER_ENTERING_PHONE)
     text = f"""
-📱 <b>Paso 3/5: Teléfono</b>
+{Icons.PHONE} <b>Paso 3/5: Teléfono</b>
 
 Ingresá tu número de contacto (ej: 11 1234-5678)
     """
@@ -252,7 +252,7 @@ def handle_phone_input(message):
     # Pasar a DNI
     set_state(chat_id, UserState.WORKER_ENTERING_DNI)
     text = f"""
-🆔 <b>Paso 4/5: DNI</b>
+{Icons.USER} <b>Paso 4/5: DNI</b>
 
 Ingresá tu número de documento (sin puntos ni espacios)
     """
@@ -308,7 +308,7 @@ def handle_dni_input(message):
 
 def ask_worker_location(chat_id: str):
     text = f"""
-📍 <b>Paso 5/5: Ubicación</b>
+{Icons.LOCATION} <b>Paso 5/5: Ubicación</b>
 
 Tocá el botón azul abajo o clip > Ubicación para enviar dónde trabajás.
     """
@@ -353,7 +353,7 @@ def handle_worker_location(message):
     logger.info(f"[LOCATION] Registro completado | chat_id: {chat_id}")
 
     final_text = f"""
-🎉 <b>¡Registro completado!</b>
+{Icons.PARTY} <b>¡Registro completado!</b>
 
 Estás activo y recibirás trabajos cercanos.
 
