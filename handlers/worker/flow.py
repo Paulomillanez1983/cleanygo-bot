@@ -257,6 +257,7 @@ def handle_worker_location(message):
     chat_id = message.chat.id
     session = get_session(chat_id)
 
+    # Solo procesar si estamos en flujo de registro
     if not session or session.state != UserState.WORKER_SHARING_LOCATION:
         return
 
@@ -277,7 +278,7 @@ def handle_worker_location(message):
     # Limpiar estado de flujo
     clear_state(chat_id)
 
-    # Mensaje final único, teclado limpio y confirmación
+    # ✅ Mensaje único final: teclado limpio y confirmación
     final_text = f"""
 🎉 <b>¡Registro completado!</b>
 
