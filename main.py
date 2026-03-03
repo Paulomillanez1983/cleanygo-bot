@@ -211,7 +211,7 @@ def handle_client_hora(message):
 # ==============================
 # 🔹 Enviar pedido con reintentos + urgencia + mini-mapa
 # ==============================
-def enviar_pedido_con_reintentos(client_id, pedido, radio_inicial=5, max_radio=20, incremento=5, espera_segundos=30):
+def enviar_pedido_con_reintentos(client_id, pedido, radio_inicial=5, max_radio=20, incremento=5, espera_segundos=15):
     radio_km = radio_inicial
     start_time = time.time()
     alerta_urgencia_enviada = False
@@ -223,8 +223,8 @@ def enviar_pedido_con_reintentos(client_id, pedido, radio_inicial=5, max_radio=2
         for worker_id, worker_data in workers.items():
             if (pedido["servicio"] in worker_data["servicios"] and
                 worker_data.get("disponible") and
-                worker_data.get("ubicacion", {}).get("lat") and
-                worker_data.get("ubicacion", {}).get("lon")):
+                "lat" in worker_data.get("ubicacion", {}) and
+                "lon" in worker_data.get("ubicacion", {})):
 
                 distancia = haversine(pedido["ubicacion"]["lat"], pedido["ubicacion"]["lon"],
                                       worker_data["ubicacion"]["lat"], worker_data["ubicacion"]["lon"])
