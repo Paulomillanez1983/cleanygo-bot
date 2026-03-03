@@ -253,19 +253,22 @@ def handle_dni_upload(message):
     send_safe(chat_id, text, get_location_keyboard())
 @bot.message_handler(content_types=['location'])
 def handle_worker_location(message):
-    """Handler para recibir ubicación del trabajador en producción"""
     chat_id = message.chat.id
+    session = get_session(chat_id)
+
+    # Solo procesar si estamos en el flujo de registro
+    if not session or str(session.state) != str(UserState.WORKER_SHARING_LOCATION):
+        return
+
+    # Telegram puede enviar location en distintos formatos; tomamos siempre .location
+    if not hasattr(message, "location") or not message.location:
+        bot.send_message(chat_id, f"{Icons.ERROR} No se pudo detectar tu ubicación. Intentá usar el botón o enviarla desde el mapa.")
+        return
+
     lat = message.location.latitude
     lon = message.location.longitude
-
-    # Verificar estado
-    session = get_session(chat_id)
-    if not session or str(session.state) != str(UserState.WORKER_SHARING_LOCATION):
-        # Estado incorrecto, ignorar
-        return
 
     try:
         process_worker_location(chat_id, lat, lon)
     except:
-        # Error genérico, informar al usuario
-        bot.send_message(chat_id, f"{Icons.ERROR} Error al guardar tu ubicación. Intentá nuevamente o escribí /cancel")
+        bot.send_message(chat_id, f"{Icons.ERROR} Error al guardar tu ubicación. Intentá nuevamente o escribí /cancel")Intentá nuevamente o escribí /cancel")
