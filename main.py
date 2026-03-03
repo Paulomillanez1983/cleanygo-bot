@@ -13,7 +13,6 @@ DB_FILE = "services_bot.db"
 
 bot = telebot.TeleBot(TOKEN)
 
-# Logging solo a consola (Railway lo lee)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -296,7 +295,7 @@ def confirm_pedido(call):
     pedido = state["data"]["pedido"]
     asyncio.run(db_execute("INSERT INTO requests (client_chat_id, servicio, hora, lat, lon) VALUES (?, ?, ?, ?, ?)", (str(chat_id), pedido["servicio"], pedido["hora"], pedido["ubicacion"]["lat"], pedido["ubicacion"]["lon"]), commit=True))
     send_safe(chat_id, "✅ Pedido enviado. Buscando prestadores cercanos...")
-    threading.Thread(target=buscar_prestadores, args=(chat_id, pedido), daemon=True).start()
+    threading.Thread(target=buscar_prestadores, args=(chat_id, pedido), daemon=True).start
     clear_state(chat_id)
 
 def buscar_prestadores(client_id, pedido, radio_inicial=5, max_radio=30, incremento=7, espera=40):
@@ -307,49 +306,95 @@ def buscar_prestadores(client_id, pedido, radio_inicial=5, max_radio=30, increme
         found = False
         workers_near = []
         rows = asyncio.run(db_execute("""
-            SELECT w.chat_id, w.lat, w.lon, w.disponible
+            SELECT w.chat_id, w.lat, w.lon, w.disponible, ws.precio
             FROM workers w JOIN worker_services ws ON w.chat_id = ws.chat_id
             WHERE ws.servicio = ? AND w.disponible = 1 AND w.lat IS NOT NULL AND w.lon IS NOT NULL
         """, (pedido["servicio"],)))
         for row in rows:
-            w_id, w_lat, w_lon, disp = row
+            w_id, w_lat, w_lon, disp, precio = row
             if disp != 1: continue
             dist = haversine(pedido["ubicacion"]["lat"], pedido["ubicacion"]["lon"], w_lat, w_lon)
             if dist <= radio:
                 found = True
-                workers_near.append((w_id, dist, w_lat, w_lon))
+                workers_near.append((w_id, dist, w_lat, w_lon, precio))
+
         if found:
-            for w_id, dist, lat, lon in workers_near:
+            for w_id, dist, lat, lon, precio in workers_near:
                 markup = types.InlineKeyboardMarkup()
                 markup.add(types.InlineKeyboardButton("✅ Aceptar", callback_data=f"aceptar_{client_id}"))
                 markup.add(types.InlineKeyboardButton("❌ Rechazar", callback_data=f"rechazar_{client_id}"))
-                send_safe(w_id, f"🚨 Pedido cerca ({dist:.1f} km)!\nServicio: {pedido['servicio']}\nHora: {pedido['hora']}\n<a href='https://maps.google.com/?q={pedido['ubicacion']['lat']},{pedido['ubicacion']['lon']}'>Ver mapa</a>", markup)
+                markup.add(types.InlineKeyboardButton("💬 Negociar", callback_data=f"negociar_{client_id}_{precio}"))
+                send_safe(w_id, f"🚨 Nuevo pedido cerca ({dist:.1f} km):\nServicio: {pedido['servicio']}\nHora: {pedido['hora']}\n<a href='https://maps.google.com/?q={pedido['ubicacion']['lat']},{pedido['ubicacion']['lon']}'>Ver mapa</a>", markup)
+
             send_safe(client_id, "Encontramos prestadores cercanos. Esperando respuesta...")
             return
+
         if not urgencia_enviada and time.time() - start > 90:
             urgencia_enviada = True
             urg_rows = asyncio.run(db_execute("SELECT DISTINCT w.chat_id FROM workers w JOIN worker_services ws ON w.chat_id = ws.chat_id WHERE ws.servicio = ?", (pedido["servicio"],)))
             for (w_id,) in urg_rows:
                 send_safe(w_id, f"‼️ URGENTE ‼️\nPedido de {pedido['servicio']} sin respuesta.\n<a href='https://maps.google.com/?q={pedido['ubicacion']['lat']},{pedido['ubicacion']['lon']}'>Ver ubicación</a>")
+
         time.sleep(espera)
         radio += incremento
+
     send_safe(client_id, "No encontramos prestadores disponibles ahora.")
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith(("aceptar_", "rechazar_")))
+@bot.callback_query_handler(func=lambda call: call.data.startswith(("aceptar_", "rechazar_", "negociar_")))
 def handle_worker_response(call):
     worker_id = str(call.message.chat.id)
-    action, client_id = call.data.split("_", 1)
-    client_id = str(client_id)
-    if action == "aceptar":
-        asyncio.run(db_execute("UPDATE workers SET disponible = 0 WHERE chat_id = ?", (worker_id,), commit=True))
-        send_safe(worker_id, "🎉 Tomaste el pedido. Contactá al cliente.")
-        send_safe(client_id, "¡Un prestador aceptó tu pedido!")
-        markup = types.InlineKeyboardMarkup()
-        markup.add(types.InlineKeyboardButton("✅ Recibí el servicio", callback_data=f"cliente_ok_{worker_id}"))
-        markup.add(types.InlineKeyboardButton("❌ Problema", callback_data=f"cliente_no_{worker_id}"))
-        send_safe(client_id, f"El prestador está en camino.", markup)
-    else:
-        send_safe(worker_id, "Rechazaste el pedido.")
+    data = call.data
+    if data.startswith("aceptar_") or data.startswith("rechazar_"):
+        action, client_id = data.split("_", 1)
+        client_id = str(client_id)
+        if action == "aceptar":
+            asyncio.run(db_execute("UPDATE workers SET disponible = 0 WHERE chat_id = ?", (worker_id,), commit=True))
+            send_safe(worker_id, "🎉 Tomaste el pedido. Contactá al cliente.")
+            send_safe(client_id, "¡Un prestador aceptó tu pedido!")
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("✅ Recibí el servicio", callback_data=f"cliente_ok_{worker_id}"))
+            markup.add(types.InlineKeyboardButton("❌ Problema", callback_data=f"cliente_no_{worker_id}"))
+            send_safe(client_id, f"El prestador está en camino.", markup)
+        else:
+            send_safe(worker_id, "Rechazaste el pedido.")
+    elif data.startswith("negociar_"):
+        action, client_id, precio = data.split("_", 2)
+        client_id = str(client_id)
+        precio = float(precio)
+        set_state(worker_id, "negociando_precio", {"client_id": client_id, "precio_original": precio})
+        send_safe(worker_id, "Ingresa el nuevo precio que propones:")
+
+@bot.message_handler(func=lambda m: get_state(m.chat.id)["state"] == "negociando_precio")
+def handle_negotiation(message):
+    worker_id = message.chat.id
+    state = get_state(worker_id)
+    client_id = state["data"]["client_id"]
+    text = message.text.strip()
+    if not is_valid_price(text):
+        send_safe(worker_id, "❌ Ingresá un número válido mayor a 0")
+        return
+    nuevo_precio = float(text)
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("✅ Aceptar nuevo precio", callback_data=f"aceptar_negociado_{worker_id}_{nuevo_precio}"))
+    markup.add(types.InlineKeyboardButton("❌ Rechazar", callback_data=f"rechazar_negociado_{worker_id}"))
+    send_safe(client_id, f"El prestador propone un nuevo precio: ${nuevo_precio}. ¿Aceptas?")
+    clear_state(worker_id)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith(("aceptar_negociado_", "rechazar_negociado_")))
+def handle_client_negotiation(call):
+    client_id = call.message.chat.id
+    data = call.data
+    if data.startswith("aceptar_negociado_"):
+        action, worker_id, nuevo_precio = data.split("_", 2)
+        nuevo_precio = float(nuevo_precio)
+        asyncio.run(db_execute("UPDATE worker_services SET precio = ? WHERE chat_id = ?", (nuevo_precio, str(worker_id)), commit=True))
+        send_safe(client_id, "✅ Aceptaste el nuevo precio. El prestador está informado.")
+        send_safe(worker_id, "✅ El cliente aceptó tu nuevo precio.")
+    elif data.startswith("rechazar_negociado_"):
+        action, worker_id = data.split("_", 1)
+        send_safe(client_id, "❌ Rechazaste el nuevo precio. El pedido se cancela.")
+        send_safe(worker_id, "❌ El cliente rechazó tu nuevo precio.")
+    clear_state(client_id)
 
 @bot.message_handler(commands=['cancel'])
 def cancel_process(message):
