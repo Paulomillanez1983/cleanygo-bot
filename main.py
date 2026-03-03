@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Optional, List, Dict
 
 # ==================== CONFIGURACIÓN ====================
-TOKEN = os.getenv("BOT_TOKEN", "TU_TOKEN_AQUI")
+TOKEN = os.getenv("BOT_TOKEN", "8534288619:AAG1i5-PdjUABerTQCp_y84XubBfVNJ34FU")
 DB_FILE = "cleanygo_ux.db"
 
 bot = telebot.TeleBot(TOKEN, parse_mode="HTML")
