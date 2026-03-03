@@ -251,7 +251,7 @@ def handle_dni_upload(message):
 # -----------------------------
 def ask_worker_location(chat_id: str):
     text = f"""
-{Icons.LOCATION} <b>Paso 5/5: Ubicación de trabajo</b>
+📍 <b>Paso 5/5: Ubicación de trabajo</b>
 
 Enviá tu ubicación para recibir avisos de trabajos cercanos.
 Podés actualizarla cuando quieras con /ubicacion
@@ -259,59 +259,43 @@ Podés actualizarla cuando quieras con /ubicacion
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     markup.add(types.KeyboardButton("📍 Enviar mi ubicación", request_location=True))
     markup.add(types.KeyboardButton("❌ Cancelar"))
-    
+
     bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
 
+
 # -----------------------------
-# HANDLER DE UBICACIÓN
+# HANDLER DE UBICACIÓN NIVEL ENTERPRISE
 # -----------------------------
 @bot.message_handler(content_types=['location'])
 def handle_worker_location(message):
     chat_id = message.chat.id
     session = get_session(chat_id)
 
-    if not session or str(session.state) != str(UserState.WORKER_SHARING_LOCATION):
+    # Solo procesar si estamos en flujo de registro
+    if not session or session.state != UserState.WORKER_SHARING_LOCATION:
         return
 
-    if not hasattr(message, "location") or not message.location:
-        bot.send_message(chat_id, f"{Icons.ERROR} No se pudo detectar tu ubicación. Intentá usar el botón nativo de Telegram.")
+    if not message.location:
+        bot.send_message(chat_id, "❌ No se pudo detectar tu ubicación. Usá el botón nativo de Telegram.")
         return
 
-    lat = message.location.latitude
-    lon = message.location.longitude
+    lat, lon = message.location.latitude, message.location.longitude
 
-    try:
-        process_worker_location(chat_id, lat, lon)
-    except:
-        bot.send_message(chat_id, f"{Icons.ERROR} Error al guardar tu ubicación. Intentá nuevamente o escribí /cancel")
-
-# -----------------------------
-# PROCESAR UBICACIÓN ENTERPRISE
-# -----------------------------
-def process_worker_location(chat_id: str, lat: float, lon: float):
-    """Procesa la ubicación y cierra el flujo correctamente sin que quede clavado"""
+    # 1️⃣ Guardar ubicación y limpiar estado
     timestamp = int(time.time())
-
-    # 1️⃣ Guardar ubicación
     db_execute(
         "UPDATE workers SET lat = ?, lon = ?, last_update = ?, disponible = 1 WHERE chat_id = ?",
         (lat, lon, timestamp, str(chat_id)),
         commit=True
     )
-
-    # 2️⃣ Limpiar estado
     clear_state(chat_id)
 
-    # 3️⃣ Mensaje inmediato de confirmación
-    bot.send_message(
-        chat_id,
-        "✅ Ubicación recibida correctamente",
-        reply_markup=types.ReplyKeyboardRemove()
-    )
+    # 2️⃣ Mensaje inmediato de confirmación
+    bot.send_message(chat_id, "✅ Ubicación recibida correctamente", reply_markup=types.ReplyKeyboardRemove())
 
-    # 4️⃣ Enviar mensaje final de registro completo
+    # 3️⃣ Mensaje final con todos los comandos, teclado limpio
     final_text = f"""
-{Icons.PARTY} <b>¡Registro completado!</b>
+🎉 <b>¡Registro completado!</b>
 
 Ya estás activo y recibirás notificaciones de trabajos cercanos.
 
@@ -323,9 +307,4 @@ Ya estás activo y recibirás notificaciones de trabajos cercanos.
 /perfil - Ver tu perfil
 /ayuda - Ayuda y soporte
     """
-    bot.send_message(
-        chat_id,
-        final_text,
-        parse_mode="HTML",
-        reply_markup=types.ReplyKeyboardRemove()
-    )
+    bot.send_message(chat_id, final_text, parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
