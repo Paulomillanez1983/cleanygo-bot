@@ -294,7 +294,6 @@ def enviar_pedido_con_reintentos(client_id, pedido, radio_inicial=5, max_radio=2
             time.sleep(espera_segundos)
             radio_km += incremento
 
-    # Si no se encontró trabajador, mostrar botón reintentar
     if clients.get(client_id, {}).get("pedido_abierto", False):
         markup_retry = types.InlineKeyboardMarkup()
         markup_retry.add(types.InlineKeyboardButton("🔄 Reintentar búsqueda", callback_data="reintentar_pedido"))
@@ -343,8 +342,7 @@ def enviar_confirmacion_cliente(client_id, servicio, prestador_id):
 @bot.callback_query_handler(func=lambda call: call.data.startswith("cliente_aceptar_") or call.data.startswith("cliente_rechazar_"))
 def handle_cliente_confirmacion(call):
     client_id = str(call.message.chat.id)
-    action, prestador_id_str = call.data.split("_")[1:]  # ['aceptar', 'prestador_id']
-    prestador_id = prestador_id_str
+    action, prestador_id = call.data.split("_")[1:]  # ['aceptar', 'prestador_id']
 
     if action == "aceptar":
         send_safe(client_id, "✅ Has confirmado la recepción del servicio. ¡Gracias!")
@@ -354,16 +352,14 @@ def handle_cliente_confirmacion(call):
         send_safe(prestador_id, "⚠️ El cliente rechazó el servicio.")
 
 # ==============================
-# ==============================
 # 🔹 Trabajador acepta/rechaza pedido
 # ==============================
 @bot.callback_query_handler(func=lambda call: call.data.startswith("aceptar_") or call.data.startswith("rechazar_"))
 def handle_worker_response(call):
     worker_id = str(call.message.chat.id)
-    action, client_id_str = call.data.split("_")
-    client_id = str(client_id_str)
+    action, client_id = call.data.split("_")
 
-    if client_id not in clients:
+   if client_id not in clients:
         send_safe(worker_id, "❌ Pedido ya no existe o fue cancelado.")
         return
 
@@ -372,11 +368,44 @@ def handle_worker_response(call):
             send_safe(worker_id, "❌ Lo sentimos, otro trabajador ya tomó este pedido.")
             return
 
+        # Marcar el pedido como tomado y trabajador ocupado
         clients[client_id]["pedido_abierto"] = False
         workers[worker_id]["disponible"] = False
+        clients[client_id]["estado"] = "servicio_en_progreso"
         save_data()
+
         send_safe(worker_id, "🎉 Tomaste el trabajo. Contactá al cliente para coordinar.")
         # Notificar cliente que un trabajador aceptó
         enviar_confirmacion_cliente(client_id, clients[client_id]["pedido"]["servicio"], worker_id)
     else:
         send_safe(worker_id, "❌ Has rechazado el pedido.")
+
+# ==============================
+# 🔹 Comando /start
+# ==============================
+@bot.message_handler(commands=['start'])
+def send_welcome(message):
+    chat_id = str(message.chat.id)
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    markup.add("Soy trabajador", "Quiero pedir un servicio")
+    send_safe(chat_id, "👋 Bienvenido al Bot de Servicios.\nSeleccioná una opción:", markup)
+
+# ==============================
+# 🔹 Manejo de texto principal
+# ==============================
+@bot.message_handler(func=lambda m: True)
+def main_text_handler(message):
+    chat_id = str(message.chat.id)
+    text = message.text.lower()
+    if "soy trabajador" in text:
+        start_worker_registration(message)
+    elif "quiero pedir un servicio" in text:
+        request_service(message)
+    else:
+        send_safe(chat_id, "❌ No entendí tu mensaje. Usá los botones para continuar.")
+
+# ==============================
+# 🔹 Iniciar bot
+# ==============================
+print("🤖 Bot iniciado...")
+bot.infinity_polling():
