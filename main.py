@@ -338,4 +338,4 @@ def handle_worker_response(call):
 
         clients[client_id]["pedido_abierto"] = False
         workers[worker_id]["disponible"] = False
-        send_safe(worker_id, "🎉 Tomaste el trabajo. Contactá
+        send_safe(worker_id, "🎉 Tomaste el trabajo. Contactá al cliente para coordinar.")
