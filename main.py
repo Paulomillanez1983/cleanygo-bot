@@ -209,9 +209,9 @@ def handle_client_hora(message):
     clients[chat_id]["estado"] = "confirmando_pedido"
 
 # ==============================
-# 🔹 Enviar pedido con reintentos + urgencia + mini-mapa
+# 🔹 Enviar pedido con reintentos, urgencia y mini-mapa + botón reintentar
 # ==============================
-def enviar_pedido_con_reintentos(client_id, pedido, radio_inicial=5, max_radio=20, incremento=5, espera_segundos=15):
+def enviar_pedido_con_reintentos(client_id, pedido, radio_inicial=5, max_radio=20, incremento=5, espera_segundos=30):
     radio_km = radio_inicial
     start_time = time.time()
     alerta_urgencia_enviada = False
@@ -261,8 +261,23 @@ def enviar_pedido_con_reintentos(client_id, pedido, radio_inicial=5, max_radio=2
             time.sleep(espera_segundos)
             radio_km += incremento
 
+    # Si no se encontró trabajador, mostrar botón reintentar
     if clients.get(client_id, {}).get("pedido_abierto", False):
-        send_safe(client_id, "⚠️ Lo sentimos, no se encontró ningún trabajador disponible para tu pedido.")
+        markup_retry = types.InlineKeyboardMarkup()
+        markup_retry.add(types.InlineKeyboardButton("🔄 Reintentar búsqueda", callback_data="reintentar_pedido"))
+        send_safe(client_id, "⚠️ Lo sentimos, no se encontró ningún trabajador disponible para tu pedido.", markup_retry)
+
+# ==============================
+# 🔹 Botón reintentar para cliente
+# ==============================
+@bot.callback_query_handler(func=lambda call: call.data=="reintentar_pedido")
+def reintentar_pedido(call):
+    chat_id = call.message.chat.id
+    if chat_id in clients and clients[chat_id].get("pedido"):
+        pedido = clients[chat_id]["pedido"].copy()
+        clients[chat_id]["pedido_abierto"] = True
+        threading.Thread(target=enviar_pedido_con_reintentos, args=(chat_id, pedido), daemon=True).start()
+        send_safe(chat_id, "🔄 Reintentando búsqueda de prestadores cercanos...")
 
 # ==============================
 # 🔹 Confirmar pedido
@@ -278,6 +293,30 @@ def confirm_pedido(call):
     clients[chat_id]["estado"] = "buscando_prestador"
     threading.Thread(target=enviar_pedido_con_reintentos, args=(chat_id, pedido), daemon=True).start()
     send_safe(chat_id, "✅ Pedido enviado a los prestadores cercanos. Esperá que acepten.")
+
+# ==============================
+# 🔹 Confirmación llegada prestador al cliente
+# ==============================
+def enviar_confirmacion_cliente(client_id, servicio, prestador_id):
+    markup_cliente = types.InlineKeyboardMarkup()
+    markup_cliente.add(types.InlineKeyboardButton("✅ Aceptar servicio", callback_data=f"cliente_aceptar_{prestador_id}"))
+    markup_cliente.add(types.InlineKeyboardButton("❌ Rechazar servicio", callback_data=f"cliente_rechazar_{prestador_id}"))
+    send_safe(client_id,
+              f"📌 Tu prestador ha llegado para el servicio '{servicio}'.\nConfirmá si recibiste el servicio:",
+              markup_cliente)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("cliente_aceptar_") or call.data.startswith("cliente_rechazar_"))
+def handle_cliente_confirmacion(call):
+    client_id = call.message.chat.id
+    action, prestador_id_str = call.data.split("_")[1:]  # ['aceptar', 'prestador_id']
+    prestador_id = int(prestador_id_str)
+
+    if action == "aceptar":
+        send_safe(client_id, "✅ Has confirmado la recepción del servicio. ¡Gracias!")
+        send_safe(prestador_id, "🎉 El cliente ha confirmado que recibiste el servicio.")
+    else:
+        send_safe(client_id, "❌ Has rechazado el servicio. Por favor contactá al prestador.")
+        send_safe(prestador_id, "⚠️ El cliente rechazó el servicio.")
 
 # ==============================
 # 🔹 Trabajador acepta/rechaza pedido
@@ -299,16 +338,4 @@ def handle_worker_response(call):
 
         clients[client_id]["pedido_abierto"] = False
         workers[worker_id]["disponible"] = False
-        send_safe(worker_id, "🎉 Tomaste el trabajo. Contactá al cliente para coordinar.")
-        send_safe(client_id, f"✅ Tu prestador ha aceptado el servicio '{clients[client_id]['pedido']['servicio']}'. Contactá para coordinar.")
-
-        for w_id, w_data in workers.items():
-            if w_id != worker_id and w_data.get("disponible"):
-                send_safe(w_id, f"⚠️ Pedido '{clients[client_id]['pedido']['servicio']}' ya fue tomado por otro trabajador.")
-
-        clients[client_id]["estado"] = "prestador_asignado"
-    else:
-        send_safe(worker_id, "❌ Has rechazado el pedido.")
-
-print("🤖 Bot iniciado y listo para usar...")
-bot.polling(non_stop=True)
+        send_safe(worker_id, "🎉 Tomaste el trabajo. Contactá
