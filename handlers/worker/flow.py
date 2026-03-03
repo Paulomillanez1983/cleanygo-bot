@@ -252,37 +252,20 @@ def handle_dni_upload(message):
     
     send_safe(chat_id, text, get_location_keyboard())
 @bot.message_handler(content_types=['location'])
-def handle_any_location(message):
+def handle_worker_location(message):
+    """Handler para recibir ubicación del trabajador en producción"""
     chat_id = message.chat.id
     lat = message.location.latitude
     lon = message.location.longitude
-    from config import logger
 
-    logger.info(f"📍 LOCATION RECIBIDA: chat_id={chat_id}, lat={lat}, lon={lon}")
-
-    try:
-        session = get_session(chat_id)
-        current_state = session.state if session else "NO_SESSION"
-        logger.info(f"📍 ESTADO ACTUAL: {current_state}")
-    except Exception as e:
-        logger.error(f"📍 ERROR obteniendo sesión: {e}")
-        current_state = "ERROR"
-
-    # Comparar como string para evitar problemas de tipo
-    if str(current_state) != str(UserState.WORKER_SHARING_LOCATION):
-        logger.info(f"📍 Ignorando ubicación, estado es {current_state}")
+    # Verificar estado
+    session = get_session(chat_id)
+    if not session or str(session.state) != str(UserState.WORKER_SHARING_LOCATION):
+        # Estado incorrecto, ignorar
         return
 
     try:
-        # Guardar en DB
-        db_execute(
-            "UPDATE workers SET lat = ?, lon = ?, last_update = ?, disponible = 1 WHERE chat_id = ?",
-            (lat, lon, int(time.time()), str(chat_id)),
-            commit=True
-        )
-        clear_state(chat_id)
-        # Enviar mensaje de éxito
-        bot.send_message(chat_id, "✅ ¡Ubicación guardada! Registro completado. Ya estás activo.")
-    except Exception as e:
-        logger.error(f"❌ ERROR procesando ubicación: {e}")
-        bot.send_message(chat_id, f"{Icons.ERROR} Error al guardar. Intentá de nuevo o escribí /cancel")
+        process_worker_location(chat_id, lat, lon)
+    except:
+        # Error genérico, informar al usuario
+        bot.send_message(chat_id, f"{Icons.ERROR} Error al guardar tu ubicación. Intentá nuevamente o escribí /cancel")
