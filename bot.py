@@ -1,92 +1,28 @@
-import telebot
-import json
-import os
+#!/usr/bin/env python3
+"""
+CleanyGo Bot - Punto de entrada principal
+"""
 
-# ==============================
-# 🔑 Configuración del token
-# ==============================
-TOKEN = "8534288619:AAG1i5-PdjUABerTQCp_y84XubBfVNJ34FU"  # Reemplazá con el token que te dio @BotFather
+# Inicializar base de datos primero
+from database import init_db
+init_db()
 
-# Verificar que el token exista
-if not TOKEN:
-    raise ValueError("❌ No se encontró el token. Por favor poné el token de tu bot.")
+# Importar handlers (registran sus decorators con el bot)
+from handlers import common
+from handlers.client import flow as client_flow
+from handlers.client import search
+from handlers.client import callbacks as client_callbacks
+from handlers.worker import flow as worker_flow
+from handlers.worker import profile
+from handlers.worker import jobs
 
-bot = telebot.TeleBot(TOKEN)
+from config import bot, logger
+from utils.icons import Icons
 
-# ==============================
-# 💾 Datos en memoria
-# ==============================
-workers = {}  # Trabajadores registrados
-clients = {}  # Clientes que piden servicios
-
-# ==============================
-# /start
-# ==============================
-@bot.message_handler(commands=['start'])
-def start(message):
+if __name__ == "__main__":
+    logger.info(f"{Icons.SUCCESS} Bot CleanyGo iniciado en modo modular")
+    
     try:
-        bot.reply_to(
-            message,
-            "👋 Bienvenido a Clean&Go Córdoba\n\n"
-            "Opciones:\n"
-            "/soytrabajador - Registrarte como trabajador\n"
-            "/pedirservicio - Hacer un pedido de servicio"
-        )
+        bot.infinity_polling(timeout=60, long_polling_timeout=60)
     except Exception as e:
-        print("Error en /start:", e)
-
-# ==============================
-# /soytrabajador
-# ==============================
-@bot.message_handler(commands=['soytrabajador'])
-def register_worker(message):
-    try:
-        workers[message.chat.id] = {"disponible": True}
-        bot.reply_to(message, "✅ Registrado como trabajador. Recibirás pedidos disponibles.")
-    except Exception as e:
-        bot.reply_to(message, "❌ Ocurrió un error al registrarte como trabajador.")
-        print("Error en /soytrabajador:", e)
-
-# ==============================
-# /pedirservicio
-# ==============================
-@bot.message_handler(commands=['pedirservicio'])
-def request_service(message):
-    try:
-        clients[message.chat.id] = True
-        bot.reply_to(message, "📝 Pedido recibido. Buscando trabajadores disponibles...")
-
-        # Notificar a todos los trabajadores disponibles
-        if workers:  # Verifica que no sea None ni vacío
-            for worker_id in workers:
-                try:
-                    bot.send_message(worker_id,
-                                     "🚨 Nuevo pedido disponible.\nEscribí /aceptar para tomar el trabajo.")
-                except Exception as e:
-                    print(f"No se pudo notificar al trabajador {worker_id}: {e}")
-        else:
-            print("⚠️ No hay trabajadores registrados para notificar.")
-
-    except Exception as e:
-        bot.reply_to(message, "❌ Ocurrió un error al realizar el pedido.")
-        print("Error en /pedirservicio:", e)
-
-# ==============================
-# /aceptar
-# ==============================
-@bot.message_handler(commands=['aceptar'])
-def accept_job(message):
-    try:
-        if message.chat.id in workers:
-            bot.reply_to(message, "🎉 Tomaste el trabajo.")
-        else:
-            bot.reply_to(message, "❌ No estás registrado como trabajador.")
-    except Exception as e:
-        bot.reply_to(message, "❌ Ocurrió un error al aceptar el trabajo.")
-        print("Error en /aceptar:", e)
-
-# ==============================
-# 🔄 Mantener el bot en ejecución
-# ==============================
-print("🤖 Bot iniciado y listo para usar...")
-bot.polling(non_stop=True)
+        logger.error(f"Error crítico: {e}")
