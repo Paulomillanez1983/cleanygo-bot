@@ -140,7 +140,7 @@ def cancel_keyboard(message):
     cancel_process(message)
 
 # ==============================
-# REGISTRO TRABAJADOR - SELECCIÓN DE SERVICIOS MEJORADA (sin trabarse)
+# REGISTRO TRABAJADOR - SELECCIÓN DE SERVICIOS (refrescado sin trabarse)
 # ==============================
 @bot.message_handler(commands=['soytrabajador'])
 def start_worker_registration(message):
@@ -163,8 +163,8 @@ def ask_services_worker(chat_id):
 
     markup = types.InlineKeyboardMarkup(row_width=1)
     for s in services_list:
-        text = f"✅ {s}" if s in selected else f"❌ {s}"
-        markup.add(types.InlineKeyboardButton(text, callback_data=f"service_{s}"))
+        prefix = "✅" if s in selected else "⬜"
+        markup.add(types.InlineKeyboardButton(f"{prefix} {s}", callback_data=f"service_{s}"))
 
     markup.add(types.InlineKeyboardButton("✅ Confirmar selección", callback_data="confirm_services"))
 
@@ -193,13 +193,12 @@ def handle_service_selection(call):
         service = data.replace("service_", "")
         if service in selected:
             selected.remove(service)
-            bot.answer_callback_query(call.id, f"❌ Quitaste {service}")
+            bot.answer_callback_query(call.id, f"⬜ Quitaste {service}")
         else:
             selected.append(service)
             bot.answer_callback_query(call.id, f"✅ Agregaste {service}")
 
-        # Refrescar botones
-        ask_services_worker(chat_id)
+        ask_services_worker(chat_id)  # Refresca el mismo mensaje
 
     elif data == "confirm_services":
         if not selected:
@@ -211,7 +210,325 @@ def handle_service_selection(call):
         set_state(chat_id, "ingresando_precios", {"services": selected[:], "current_index": 0})
         ask_price_worker(chat_id)
 
-# (el resto del código queda exactamente igual: precios, nombre, DNI, ubicación, pedir servicio, selector de hora con botones, negociación, etc.)
+# ==============================
+# PRECIOS POR HORA
+# ==============================
+def ask_price_worker(chat_id):
+    state = get_state(chat_id)
+    idx = state["data"]["current_index"]
+    services = state["data"]["services"]
+
+    if idx >= len(services):
+        send_safe(chat_id, "✅ Todos los precios ingresados. Ahora tu nombre completo.")
+        set_state(chat_id, "nombre_worker")
+        return
+
+    service = services[idx]
+    send_safe(chat_id, f"Precio por hora para '{service}' (número mayor a 0):")
+
+@bot.message_handler(func=lambda m: get_state(m.chat.id)["state"] == "ingresando_precios")
+def handle_worker_price(message):
+    chat_id = message.chat.id
+    state = get_state(chat_id)
+    text = message.text.strip()
+
+    if not is_valid_price(text):
+        send_safe(chat_id, "❌ Ingresá un número válido mayor a 0")
+        return
+
+    price = float(text)
+    service = state["data"]["services"][state["data"]["current_index"]]
+
+    asyncio.run(db_execute(
+        "INSERT OR REPLACE INTO worker_services (chat_id, servicio, precio) VALUES (?, ?, ?)",
+        (str(chat_id), service, price), commit=True
+    ))
+
+    send_safe(chat_id, f"💰 Precio por hora de '{service}': ${price}")
+
+    state["data"]["current_index"] += 1
+    ask_price_worker(chat_id)
+
+@bot.message_handler(func=lambda m: get_state(m.chat.id)["state"] == "nombre_worker")
+def handle_worker_name(message):
+    chat_id = message.chat.id
+    nombre = message.text.strip()
+    if len(nombre) < 3:
+        send_safe(chat_id, "El nombre debe tener al menos 3 letras.")
+        return
+
+    asyncio.run(db_execute(
+        "UPDATE workers SET nombre = ? WHERE chat_id = ?",
+        (nombre, str(chat_id)), commit=True
+    ))
+
+    send_safe(chat_id, "📄 Ahora enviá foto del DNI (frontal)")
+    set_state(chat_id, "dni_worker")
+
+@bot.message_handler(content_types=['photo'], func=lambda m: get_state(m.chat.id)["state"] == "dni_worker")
+def handle_worker_dni(message):
+    chat_id = message.chat.id
+    file_id = message.photo[-1].file_id
+
+    asyncio.run(db_execute(
+        "UPDATE workers SET dni_file_id = ?, last_update = ? WHERE chat_id = ?",
+        (file_id, int(time.time()), str(chat_id)), commit=True
+    ))
+
+    send_safe(chat_id, "✅ Registro completo. Estás en línea.\n/offline para desconectarte.\n/actualizarubicacion para tu posición.")
+    clear_state(chat_id)
+
+@bot.message_handler(commands=['offline'])
+def go_offline(message):
+    chat_id = message.chat.id
+    exists = asyncio.run(db_execute(
+        "SELECT 1 FROM workers WHERE chat_id = ?",
+        (str(chat_id),), fetch_one=True
+    ))
+    if not exists:
+        send_safe(chat_id, "No estás registrado como trabajador.")
+        return
+
+    asyncio.run(db_execute(
+        "UPDATE workers SET disponible = 0 WHERE chat_id = ?",
+        (str(chat_id),), commit=True
+    ))
+    send_safe(chat_id, "🛑 Estás fuera de línea.")
+
+# ==============================
+# ACTUALIZAR UBICACIÓN
+# ==============================
+@bot.message_handler(commands=['actualizarubicacion'])
+def update_worker_location(message):
+    chat_id = message.chat.id
+    exists = asyncio.run(db_execute("SELECT 1 FROM workers WHERE chat_id = ?", (str(chat_id),), fetch_one=True))
+    if not exists:
+        send_safe(chat_id, "Solo trabajadores registrados pueden actualizar ubicación.")
+        return
+
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    markup.add(types.KeyboardButton("📍 Enviar ubicación", request_location=True))
+    send_safe(chat_id, "Enviá tu ubicación actual:", markup)
+    set_state(chat_id, "actualizando_ubicacion")
+
+@bot.message_handler(content_types=['location'], func=lambda m: get_state(m.chat.id)["state"] == "actualizando_ubicacion")
+def handle_worker_location(message):
+    chat_id = message.chat.id
+    loc = message.location
+    asyncio.run(db_execute(
+        "UPDATE workers SET lat = ?, lon = ?, last_update = ? WHERE chat_id = ?",
+        (loc.latitude, loc.longitude, int(time.time()), str(chat_id)), commit=True
+    ))
+    send_safe(chat_id, "✅ Ubicación guardada.")
+    clear_state(chat_id)
+
+# ==============================
+# PEDIR SERVICIO - SELECTOR DE HORA
+# ==============================
+@bot.message_handler(commands=['pedirservicio'])
+def request_service(message):
+    chat_id = message.chat.id
+    if get_state(chat_id)["state"] != "idle":
+        send_safe(chat_id, "Terminá o cancelá el proceso actual con /cancel")
+        return
+
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    for s in services_list:
+        markup.add(s)
+
+    send_safe(chat_id, "Seleccioná el servicio que necesitás:", markup)
+    set_state(chat_id, "seleccionando_servicio_cliente")
+
+@bot.message_handler(func=lambda m: get_state(m.chat.id)["state"] == "seleccionando_servicio_cliente")
+def handle_service_choice(message):
+    chat_id = message.chat.id
+    servicio = message.text.strip()
+    if servicio not in services_list:
+        send_safe(chat_id, "Servicio no válido. Elegí de la lista.")
+        return
+
+    set_state(chat_id, "seleccionando_hora", {"servicio": servicio})
+    send_hora_selector(chat_id)
+
+def send_hora_selector(chat_id):
+    markup = types.InlineKeyboardMarkup(row_width=6)
+    for h in range(0, 24):
+        h_str = f"{h:02d}"
+        markup.add(types.InlineKeyboardButton(h_str, callback_data=f"hora_{h_str}"))
+    send_safe(chat_id, "Seleccioná la hora (HH):", markup)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("hora_"))
+def handle_hora(call):
+    chat_id = call.message.chat.id
+    state = get_state(chat_id)
+    if state["state"] != "seleccionando_hora":
+        bot.answer_callback_query(call.id, "Acción no válida ahora")
+        return
+    hora = call.data.replace("hora_", "")
+    state["data"]["hora"] = hora
+    send_minutos_selector(chat_id)
+
+def send_minutos_selector(chat_id):
+    markup = types.InlineKeyboardMarkup(row_width=4)
+    for m in ["00", "15", "30", "45"]:
+        markup.add(types.InlineKeyboardButton(m, callback_data=f"min_{m}"))
+    send_safe(chat_id, "Seleccioná los minutos:", markup)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("min_"))
+def handle_minutos(call):
+    chat_id = call.message.chat.id
+    state = get_state(chat_id)
+    minutos = call.data.replace("min_", "")
+    state["data"]["minutos"] = minutos
+    send_ampm_selector(chat_id)
+
+def send_ampm_selector(chat_id):
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.add(types.InlineKeyboardButton("AM", callback_data="ampm_AM"))
+    markup.add(types.InlineKeyboardButton("PM", callback_data="ampm_PM"))
+    send_safe(chat_id, "Seleccioná AM o PM:", markup)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("ampm_"))
+def handle_ampm(call):
+    chat_id = call.message.chat.id
+    state = get_state(chat_id)
+    ampm = call.data.replace("ampm_", "")
+    hora_completa = f"{state['data']['hora']}:{state['data']['minutos']} {ampm}"
+    send_safe(chat_id, f"Hora seleccionada: {hora_completa}")
+    set_state(chat_id, "esperando_ubicacion_cliente", {"servicio": state["data"]["servicio"], "hora": hora_completa})
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    markup.add(types.KeyboardButton("📍 Enviar mi ubicación", request_location=True))
+    send_safe(chat_id, "Enviá tu ubicación para encontrar prestadores cercanos:", markup)
+
+@bot.message_handler(content_types=['location'], func=lambda m: get_state(m.chat.id)["state"] == "esperando_ubicacion_cliente")
+def handle_client_location(message):
+    chat_id = message.chat.id
+    loc = message.location
+    state = get_state(chat_id)
+    pedido = {
+        "servicio": state["data"]["servicio"],
+        "hora": state["data"]["hora"],
+        "ubicacion": {"lat": loc.latitude, "lon": loc.longitude}
+    }
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("✅ Enviar pedido", callback_data="confirmar_pedido"))
+    send_safe(chat_id, f"Confirmá:\nServicio: {pedido['servicio']}\nHora: {pedido['hora']}\nUbicación recibida.", markup)
+    set_state(chat_id, "confirmando_pedido", {"pedido": pedido})
+
+@bot.callback_query_handler(func=lambda call: call.data == "confirmar_pedido")
+def confirm_pedido(call):
+    chat_id = call.message.chat.id
+    state = get_state(chat_id)
+    if state["state"] != "confirmando_pedido":
+        return
+
+    pedido = state["data"]["pedido"]
+    asyncio.run(db_execute(
+        "INSERT INTO requests (client_chat_id, servicio, hora, lat, lon) VALUES (?, ?, ?, ?, ?)",
+        (str(chat_id), pedido["servicio"], pedido["hora"], pedido["ubicacion"]["lat"], pedido["ubicacion"]["lon"]),
+        commit=True
+    ))
+
+    send_safe(chat_id, "✅ Pedido enviado. Buscando prestadores cercanos...")
+    threading.Thread(target=buscar_prestadores, args=(chat_id, pedido), daemon=True).start()
+    clear_state(chat_id)
+
+def buscar_prestadores(client_id, pedido, radio_inicial=5, max_radio=30, incremento=7, espera=40):
+    radio = radio_inicial
+    start = time.time()
+    urgencia_enviada = False
+
+    while time.time() - start < 900:
+        found = False
+        workers_near = []
+
+        rows = asyncio.run(db_execute("""
+            SELECT w.chat_id, w.lat, w.lon, w.disponible, ws.precio
+            FROM workers w
+            JOIN worker_services ws ON w.chat_id = ws.chat_id
+            WHERE ws.servicio = ? AND w.disponible = 1 AND w.lat IS NOT NULL AND w.lon IS NOT NULL
+        """, (pedido["servicio"],)))
+
+        for row in rows:
+            w_id, w_lat, w_lon, disp, precio = row
+            if disp != 1: continue
+            dist = haversine(pedido["ubicacion"]["lat"], pedido["ubicacion"]["lon"], w_lat, w_lon)
+            if dist <= radio:
+                found = True
+                workers_near.append((w_id, dist, w_lat, w_lon, precio))
+
+        if found:
+            for w_id, dist, lat, lon, precio in workers_near:
+                markup = types.InlineKeyboardMarkup()
+                markup.add(types.InlineKeyboardButton("✅ Aceptar", callback_data=f"aceptar_{client_id}"))
+                markup.add(types.InlineKeyboardButton("❌ Rechazar", callback_data=f"rechazar_{client_id}"))
+                send_safe(w_id, f"🚨 Pedido cerca ({dist:.1f} km)!\nServicio: {pedido['servicio']}\nHora: {pedido['hora']}\nPrecio por hora: ${precio}\n<a href='https://maps.google.com/?q={pedido['ubicacion']['lat']},{pedido['ubicacion']['lon']}'>Ver mapa</a>", markup)
+
+            send_safe(client_id, "Encontramos prestadores cercanos. Esperando respuesta...")
+            return
+
+        if not urgencia_enviada and time.time() - start > 90:
+            urgencia_enviada = True
+            urg_rows = asyncio.run(db_execute(
+                "SELECT DISTINCT w.chat_id FROM workers w JOIN worker_services ws ON w.chat_id = ws.chat_id WHERE ws.servicio = ?",
+                (pedido["servicio"],)
+            ))
+            for (w_id,) in urg_rows:
+                send_safe(w_id, f"‼️ URGENTE ‼️\nPedido de {pedido['servicio']} sin respuesta.\n<a href='https://maps.google.com/?q={pedido['ubicacion']['lat']},{pedido['ubicacion']['lon']}'>Ver ubicación</a>")
+
+        time.sleep(espera)
+        radio += incremento
+
+    send_safe(client_id, "No encontramos prestadores disponibles ahora. Intenta más tarde o con /pedirservicio de nuevo.")
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith(("aceptar_", "rechazar_")))
+def handle_worker_response(call):
+    worker_id = str(call.message.chat.id)
+    action, client_id = call.data.split("_", 1)
+    client_id = str(client_id)
+
+    if action == "aceptar":
+        asyncio.run(db_execute(
+            "UPDATE workers SET disponible = 0 WHERE chat_id = ?",
+            (worker_id,), commit=True
+        ))
+
+        send_safe(worker_id, "🎉 Tomaste el pedido. Contactá al cliente.")
+        send_safe(client_id, "¡Un prestador aceptó tu pedido! Te llegará su contacto pronto.")
+
+        markup = types.InlineKeyboardMarkup()
+        markup.add(
+            types.InlineKeyboardButton("✅ Recibí el servicio", callback_data=f"cliente_ok_{worker_id}"),
+            types.InlineKeyboardButton("❌ Problema", callback_data=f"cliente_no_{worker_id}")
+        )
+        send_safe(client_id, f"El prestador está en camino para {get_state(client_id).get('data', {}).get('servicio', 'el servicio')}.", markup)
+
+    else:
+        send_safe(worker_id, "Rechazaste el pedido.")
+
+@bot.message_handler(commands=['cancel'])
+def cancel_process(message):
+    chat_id = message.chat.id
+    old_state = get_state(chat_id)["state"]
+    clear_state(chat_id)
+    send_safe(chat_id, "Proceso cancelado." if old_state != "idle" else "No había proceso activo.")
+
+@bot.message_handler(commands=['start'])
+def start_command(message):
+    chat_id = message.chat.id
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
+    markup.add(types.KeyboardButton("🛎️ Soy Cliente"))
+    markup.add(types.KeyboardButton("💼 Soy Prestador"))
+    markup.add(types.KeyboardButton("❌ Cancelar"))
+    send_safe(chat_id, "👋 ¡Bienvenido al Bot de Servicios!\n\nElige tu rol:", markup)
+
+@bot.message_handler(func=lambda m: True)
+def fallback(message):
+    state = get_state(message.chat.id)["state"]
+    if state == "idle":
+        send_safe(message.chat.id, "Usá /start para ver opciones.")
+    else:
+        send_safe(message.chat.id, "Estoy esperando algo específico. Usa /cancel si querés reiniciar.")
 
 if __name__ == "__main__":
     loop = asyncio.get_event_loop()
