@@ -304,4 +304,3 @@ Ya estás activo y recibirás notificaciones de trabajos cercanos.
         import traceback
         logger.error(traceback.format_exc())
         bot.send_message(chat_id, f"{Icons.ERROR} Error: {str(e)}")
-
