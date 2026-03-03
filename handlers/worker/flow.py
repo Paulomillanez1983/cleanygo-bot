@@ -238,7 +238,6 @@ def handle_dni_upload(message):
 # -----------------------------
 def ask_worker_location(chat_id: str):
     text = f"""
-text = f"""
 📍 <b>Paso 5/5: Ubicación de trabajo</b>
 
 Enviá tu ubicación usando el botón 📍 "Enviar mi ubicación" para recibir avisos de trabajos cercanos.
@@ -253,13 +252,10 @@ Podés actualizarla cuando quieras con /ubicacion
 # -----------------------------
 # HANDLER DE UBICACIÓN FINAL
 # -----------------------------
-@bot.message_handler(content_types=['location', 'venue'])
+@bot.message_handler(func=lambda m: get_session(m.chat.id).state == UserState.WORKER_SHARING_LOCATION,
+                     content_types=['location', 'venue'])
 def handle_worker_location(message):
     chat_id = message.chat.id
-    session = get_session(chat_id)
-
-    if not session or session.state != UserState.WORKER_SHARING_LOCATION:
-        return
 
     # Detectar ubicación según tipo
     lat, lon = None, None
