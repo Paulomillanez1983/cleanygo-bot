@@ -354,9 +354,29 @@ def handle_cliente_confirmacion(call):
         send_safe(prestador_id, "⚠️ El cliente rechazó el servicio.")
 
 # ==============================
+# ==============================
 # 🔹 Trabajador acepta/rechaza pedido
 # ==============================
 @bot.callback_query_handler(func=lambda call: call.data.startswith("aceptar_") or call.data.startswith("rechazar_"))
 def handle_worker_response(call):
     worker_id = str(call.message.chat.id)
-    action,
+    action, client_id_str = call.data.split("_")
+    client_id = str(client_id_str)
+
+    if client_id not in clients:
+        send_safe(worker_id, "❌ Pedido ya no existe o fue cancelado.")
+        return
+
+    if action == "aceptar":
+        if not clients[client_id].get("pedido_abierto", True):
+            send_safe(worker_id, "❌ Lo sentimos, otro trabajador ya tomó este pedido.")
+            return
+
+        clients[client_id]["pedido_abierto"] = False
+        workers[worker_id]["disponible"] = False
+        save_data()
+        send_safe(worker_id, "🎉 Tomaste el trabajo. Contactá al cliente para coordinar.")
+        # Notificar cliente que un trabajador aceptó
+        enviar_confirmacion_cliente(client_id, clients[client_id]["pedido"]["servicio"], worker_id)
+    else:
+        send_safe(worker_id, "❌ Has rechazado el pedido.")
