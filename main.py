@@ -295,7 +295,7 @@ def confirm_pedido(call):
     pedido = state["data"]["pedido"]
     asyncio.run(db_execute("INSERT INTO requests (client_chat_id, servicio, hora, lat, lon) VALUES (?, ?, ?, ?, ?)", (str(chat_id), pedido["servicio"], pedido["hora"], pedido["ubicacion"]["lat"], pedido["ubicacion"]["lon"]), commit=True))
     send_safe(chat_id, "✅ Pedido enviado. Buscando prestadores cercanos...")
-    threading.Thread(target=buscar_prestadores, args=(chat_id, pedido), daemon=True).start
+    threading.Thread(target=buscar_prestadores, args=(chat_id, pedido), daemon=True).start()
     clear_state(chat_id)
 
 def buscar_prestadores(client_id, pedido, radio_inicial=5, max_radio=30, incremento=7, espera=40):
@@ -324,7 +324,7 @@ def buscar_prestadores(client_id, pedido, radio_inicial=5, max_radio=30, increme
                 markup.add(types.InlineKeyboardButton("✅ Aceptar", callback_data=f"aceptar_{client_id}"))
                 markup.add(types.InlineKeyboardButton("❌ Rechazar", callback_data=f"rechazar_{client_id}"))
                 markup.add(types.InlineKeyboardButton("💬 Negociar", callback_data=f"negociar_{client_id}_{precio}"))
-                send_safe(w_id, f"🚨 Nuevo pedido cerca ({dist:.1f} km):\nServicio: {pedido['servicio']}\nHora: {pedido['hora']}\n<a href='https://maps.google.com/?q={pedido['ubicacion']['lat']},{pedido['ubicacion']['lon']}'>Ver mapa</a>", markup)
+                send_safe(w_id, f"🚨 Nuevo pedido cerca ({dist:.1f} km):\nServicio: {pedido['servicio']}\nHora: {pedido['hora']}\nPrecio base: ${precio}\n<a href='https://maps.google.com/?q={pedido['ubicacion']['lat']},{pedido['ubicacion']['lon']}'>Ver mapa</a>", markup)
 
             send_safe(client_id, "Encontramos prestadores cercanos. Esperando respuesta...")
             return
@@ -390,6 +390,11 @@ def handle_client_negotiation(call):
         asyncio.run(db_execute("UPDATE worker_services SET precio = ? WHERE chat_id = ?", (nuevo_precio, str(worker_id)), commit=True))
         send_safe(client_id, "✅ Aceptaste el nuevo precio. El prestador está informado.")
         send_safe(worker_id, "✅ El cliente aceptó tu nuevo precio.")
+        asyncio.run(db_execute("UPDATE workers SET disponible = 0 WHERE chat_id = ?", (worker_id,), commit=True))
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("✅ Recibí el servicio", callback_data=f"cliente_ok_{worker_id}"))
+        markup.add(types.InlineKeyboardButton("❌ Problema", callback_data=f"cliente_no_{worker_id}"))
+        send_safe(client_id, f"El prestador está en camino.", markup)
     elif data.startswith("rechazar_negociado_"):
         action, worker_id = data.split("_", 1)
         send_safe(client_id, "❌ Rechazaste el nuevo precio. El pedido se cancela.")
@@ -428,6 +433,4 @@ if __name__ == "__main__":
     logger.info("🤖 Bot iniciado correctamente")
     print("🤖 Bot corriendo...")
 
-    logger.info("Iniciando polling...")  # ← nuevo log
     bot.infinity_polling(timeout=30, long_polling_timeout=30, skip_pending=True)
-    logger.info("Polling terminado (no debería llegar acá)")  # ← nunca debería verse
