@@ -238,9 +238,10 @@ def handle_dni_upload(message):
 # -----------------------------
 def ask_worker_location(chat_id: str):
     text = f"""
+text = f"""
 📍 <b>Paso 5/5: Ubicación de trabajo</b>
 
-Enviá tu ubicación para recibir avisos de trabajos cercanos.
+Enviá tu ubicación usando el botón 📍 "Enviar mi ubicación" para recibir avisos de trabajos cercanos.
 Podés actualizarla cuando quieras con /ubicacion
 """
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
