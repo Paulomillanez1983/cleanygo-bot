@@ -133,17 +133,21 @@ def proceed_to_location(chat_id: str, message_id: int):
 def handle_client_location(message):
     from models.user_state import get_session, UserState
     
-    chat_id = message.chat.id
-    lat = message.location.latitude
-    lon = message.location.longitude
-    
-    update_data(chat_id, lat=lat, lon=lon, location_shared=True)
-    
-    service_id = get_data(chat_id, "service_id")
-    time_str = get_data(chat_id, "selected_time")
-    period = get_data(chat_id, "time_period")
-    
-    confirmation_text = f"""
+    try:
+        chat_id = message.chat.id
+        lat = message.location.latitude
+        lon = message.location.longitude
+        
+        update_data(chat_id, lat=lat, lon=lon, location_shared=True)
+        
+        service_id = get_data(chat_id, "service_id")
+        time_str = get_data(chat_id, "selected_time")
+        period = get_data(chat_id, "time_period")
+        
+        # IMPORTANTE: Eliminar teclado de ubicación primero
+        remove_keyboard(chat_id, "📍 Ubicación recibida")
+        
+        confirmation_text = f"""
 {Icons.CALENDAR} <b>Confirma tu solicitud</b>
 
 {get_service_display(service_id)}
@@ -151,8 +155,12 @@ def handle_client_location(message):
 {Icons.LOCATION} <b>Ubicación:</b> Recibida ✓
 
 ¿Todo correcto?
-    """
-    
-    set_state(chat_id, UserState.CLIENT_CONFIRMING)
-    remove_keyboard(chat_id)
-    send_safe(chat_id, confirmation_text, get_confirmation_keyboard())
+        """
+        
+        set_state(chat_id, UserState.CLIENT_CONFIRMING)
+        send_safe(chat_id, confirmation_text, get_confirmation_keyboard())
+        
+    except Exception as e:
+        from config import logger
+        logger.error(f"Error en handle_client_location: {e}")
+        send_safe(chat_id, f"{Icons.ERROR} Error al procesar ubicación. Intentá de nuevo.")
