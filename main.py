@@ -5,9 +5,7 @@ import re
 TOKEN = "8534288619:AAG1i5-PdjUABerTQCp_y84XubBfVNJ34FU"
 bot = telebot.TeleBot(TOKEN)
 
-# ==============================
 # 💾 Datos en memoria
-# ==============================
 workers = {}  # chat_id -> {"servicios": [], "precios": {}, "disponible": True, "info": {}}
 clients = {}  # chat_id -> {"estado": str, "pedido": {}}
 services_list = ["Niñera", "Cuidado de personas", "Instalación de aire acondicionado", "Visita técnica de aire acondicionado"]
@@ -103,7 +101,7 @@ def handle_worker_price(message):
         send_safe(chat_id, "❌ Ingresá un número válido para el precio.")
 
 # ==============================
-# Registro datos personales
+# Registro datos personales trabajador
 # ==============================
 def ask_worker_info(chat_id):
     send_safe(chat_id, "📄 Enviá tu nombre completo:")
@@ -125,9 +123,6 @@ def handle_worker_dni(message):
     clients[chat_id]["estado"] = "en_linea"
     workers[chat_id]["disponible"] = True
 
-# ==============================
-# Trabajador se desconecta temporalmente
-# ==============================
 @bot.message_handler(commands=['offline'])
 def go_offline(message):
     chat_id = message.chat.id
@@ -138,7 +133,7 @@ def go_offline(message):
         send_safe(chat_id, "❌ No estás registrado como trabajador.")
 
 # ==============================
-# Cliente solicita servicio
+# Cliente solicita servicio con ubicación y horario
 # ==============================
 @bot.message_handler(commands=['pedirservicio'])
 def request_service(message):
@@ -158,21 +153,47 @@ def handle_client_service(message):
         return
 
     clients[chat_id]["pedido"]["servicio"] = service
-    clients[chat_id]["estado"] = "buscando_prestador"
-    send_safe(chat_id, "🔎 Buscando prestador disponible para tu servicio...")
+    clients[chat_id]["estado"] = "ingresando_ubicacion"
 
+    # Botón para enviar ubicación
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    markup.add(types.KeyboardButton("📍 Enviar ubicación", request_location=True))
+    send_safe(chat_id, "📍 Por favor enviá tu ubicación para el servicio:", markup)
+
+@bot.message_handler(content_types=['location'], func=lambda m: clients.get(m.chat.id, {}).get("estado")=="ingresando_ubicacion")
+def handle_client_location(message):
+    chat_id = message.chat.id
+    location = message.location
+    clients[chat_id]["pedido"]["ubicacion"] = {"lat": location.latitude, "lon": location.longitude}
+    clients[chat_id]["estado"] = "ingresando_horario"
+    send_safe(chat_id, "🕒 Ingresá la hora para el servicio (HH:MM):")
+
+@bot.message_handler(func=lambda m: clients.get(m.chat.id, {}).get("estado")=="ingresando_horario")
+def handle_client_hora(message):
+    chat_id = message.chat.id
+    hora = message.text
+    if not validate_hora(hora):
+        send_safe(chat_id, "❌ Formato inválido. Ingresá la hora como HH:MM")
+        return
+    clients[chat_id]["pedido"]["hora"] = hora
+    clients[chat_id]["estado"] = "confirmando_pedido"
+
+    pedido = clients[chat_id]["pedido"]
+    ubic = pedido["ubicacion"]
+    send_safe(chat_id, f"✅ Pedido listo para enviar:\nServicio: {pedido['servicio']}\nHora: {hora}\nUbicación: {ubic['lat']}, {ubic['lon']}\n\nSi todo está correcto, el pedido será enviado a los prestadores disponibles.")
+
+    # Enviar a trabajadores disponibles
     found = False
     for worker_id, worker_data in workers.items():
-        if service in worker_data["servicios"] and worker_data.get("disponible"):
+        if pedido["servicio"] in worker_data["servicios"] and worker_data.get("disponible"):
             found = True
-            send_safe(worker_id, f"🚨 Nuevo pedido para '{service}'. Escribí /aceptar para tomarlo.")
+            send_safe(worker_id, f"🚨 Nuevo pedido:\nServicio: {pedido['servicio']}\nHora: {hora}\nUbicación: {ubic['lat']}, {ubic['lon']}\nEscribí /aceptar para tomarlo.")
 
     if not found:
         send_safe(chat_id, "⚠️ No hay prestadores disponibles por el momento. Intentá más tarde.")
 
-# ==============================
-# Aceptar trabajo /aceptar
-# ==============================
+    clients[chat_id]["estado"] = "buscando_prestador"
+
 @bot.message_handler(commands=['aceptar'])
 def accept_job(message):
     chat_id = message.chat.id
