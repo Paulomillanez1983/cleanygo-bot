@@ -15,9 +15,9 @@
     }
   },
   "deploy": {
-    "startCommand": "python bot.py",  // o el nombre exacto de tu archivo principal (donde está if __name__ == "__main__")
+    "startCommand": "python bot.py",
     "restartPolicyType": "ALWAYS",
-    "restartPolicyMaxRetries": -1,  // infinito
+    "restartPolicyMaxRetries": -1,
     "sleepApplication": false
   }
 }
