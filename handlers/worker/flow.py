@@ -333,6 +333,8 @@ def save_worker_data(chat_id: str, dni: str):
 
     for service_id in selected_services:
         precio = float(prices.get(service_id) or 0)
-        db_execute("INSERT OR REPLACE INTO worker_services (chat_id, service_id, precio) VALUES (?, ?, ?)",
-                   (str(chat_id), service_id, precio), commit=True)
-
+        db_execute(
+            "INSERT OR REPLACE INTO worker_services (chat_id, service_id, precio) VALUES (?, ?, ?)",
+            (str(chat_id), service_id, precio),
+            commit=True
+    )
