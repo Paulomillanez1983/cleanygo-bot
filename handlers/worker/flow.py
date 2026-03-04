@@ -336,12 +336,3 @@ def save_worker_data(chat_id: str, dni: str):
         db_execute("INSERT OR REPLACE INTO worker_services (chat_id, service_id, precio) VALUES (?, ?, ?)",
                    (str(chat_id), service_id, precio), commit=True)
 
-# ==================== POLLING ====================
-if __name__ == "__main__":
-    logger.info("🚀 Bot CleanyGo iniciando en modo POLLING")
-    while True:
-        try:
-            bot.infinity_polling(timeout=60, long_polling_timeout=30, skip_pending=True, none_stop=True)
-        except Exception as e:
-            logger.error(f"Error polling: {e}")
-            time.sleep(3)
