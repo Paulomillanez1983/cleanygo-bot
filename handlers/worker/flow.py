@@ -264,6 +264,8 @@ def ask_worker_location(chat_id: int):
 def handle_location(message):
     chat_id = message.chat.id
     session = get_session(chat_id)
+
+    # Verificamos que el usuario esté en el paso correcto
     if not session or session.state != UserState.WORKER_SHARING_LOCATION:
         return
 
@@ -289,7 +291,7 @@ def handle_location(message):
         reply_markup=types.ReplyKeyboardRemove()
     )
 
-    # Mostrar menú principal del trabajador si está disponible
+    # Mostrar menú principal del trabajador si el módulo está disponible
     try:
         from handlers.worker.profile import show_worker_menu
         worker = db_execute(
@@ -297,17 +299,10 @@ def handle_location(message):
             (str(chat_id),),
             fetch_one=True
         )
-        show_worker_menu(chat_id, worker)
+        if worker:
+            show_worker_menu(chat_id, worker)
     except ImportError:
-        bot.send_message(chat_id, "Tu registro está completo, pero el menú de perfil no está disponible.")
-
-# ======================================================
-# ==================== UTIL ============================
-# ======================================================
-def cancel_flow(chat_id: int):
-    clear_state(chat_id)
-    bot.send_message(chat_id, "Registro cancelado.", reply_markup=types.ReplyKeyboardRemove())
-
+        bot.send_message(chat_id, "Tu registro se completó, pero el menú no está disponible.")
 # ======================================================
 # ================= GUARDAR WORKER =====================
 # ======================================================
