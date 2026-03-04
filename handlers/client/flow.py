@@ -1,5 +1,5 @@
 from config import bot
-from models.user_state import set_state, update_data, get_data, UserState, get_session  # <-- AGREGADO get_session
+from models.user_state import set_state, update_data, get_data, UserState, get_session
 from models.services_data import SERVICES
 from utils.icons import Icons
 from utils.keyboards import (
@@ -7,7 +7,10 @@ from utils.keyboards import (
     get_location_keyboard, get_confirmation_keyboard, get_role_keyboard
 )
 from handlers.common import send_safe, edit_safe, delete_safe, remove_keyboard
-from telebot import types  # <-- AGREGADO types que faltaba
+from telebot import types
+import logging
+
+logger = logging.getLogger(__name__)
 
 # ==================== FLUJO CLIENTE ====================
 
@@ -129,14 +132,28 @@ def proceed_to_location(chat_id: str, message_id: int):
     delete_safe(chat_id, message_id)
     send_safe(chat_id, text, get_location_keyboard())
 
-@bot.message_handler(content_types=['location'], 
-                    func=lambda m: get_session(m.chat.id).state == UserState.CLIENT_SHARING_LOCATION)
+# CORRECCIÓN CRÍTICA: Lambda seguro que no crashea si no hay sesión
+def _is_client_sharing_location(message):
+    """Función segura para verificar si el cliente está compartiendo ubicación"""
+    try:
+        session = get_session(message.chat.id)
+        return session is not None and session.state == UserState.CLIENT_SHARING_LOCATION
+    except Exception as e:
+        logger.error(f"Error en _is_client_sharing_location: {e}")
+        return False
+
+@bot.message_handler(content_types=['location'], func=_is_client_sharing_location)
 def handle_client_location(message):
-    # NOTA: get_session ya está importado arriba, no hace falta re-importar
+    """
+    Handler para ubicación del cliente.
+    Solo se ejecuta si _is_client_sharing_location retorna True.
+    """
     try:
         chat_id = message.chat.id
         lat = message.location.latitude
         lon = message.location.longitude
+        
+        logger.info(f"[CLIENT LOCATION] Recibida de chat_id={chat_id}: lat={lat}, lon={lon}")
         
         update_data(chat_id, lat=lat, lon=lon, location_shared=True)
         
@@ -159,8 +176,8 @@ def handle_client_location(message):
         
         set_state(chat_id, UserState.CLIENT_CONFIRMING)
         send_safe(chat_id, confirmation_text, get_confirmation_keyboard())
+        logger.info(f"[CLIENT LOCATION] Flujo completado para chat_id={chat_id}")
         
     except Exception as e:
-        from config import logger
-        logger.error(f"Error en handle_client_location: {e}")
+        logger.error(f"[CLIENT LOCATION] Error: {e}")
         send_safe(chat_id, f"{Icons.ERROR} Error al procesar ubicación. Intentá de nuevo.")
