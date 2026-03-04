@@ -14,28 +14,22 @@ from utils.keyboards import get_service_selector
 from handlers.common import send_safe, edit_safe
 from database import db_execute
 
-
 # ==================== CONFIGURACIÓN ====================
-
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s"
 )
-
 logger = logging.getLogger(__name__)
 apihelper.SESSION_TIME_TO_LIVE = 10 * 60
-
 
 # ======================================================
 # ==================== FLUJO WORKER ====================
 # ======================================================
-
 @bot.message_handler(regexp=r'(?i)(trabajar|prestador|quiero trabajar)')
 def handle_worker_start(message):
     chat_id = message.chat.id
     logger.info(f"[START] Activado por '{message.text}' | chat_id: {chat_id}")
     start_worker_flow(chat_id)
-
 
 def start_worker_flow(chat_id: int):
     worker = db_execute(
@@ -45,13 +39,14 @@ def start_worker_flow(chat_id: int):
     )
 
     if worker:
-        from handlers.worker.profile import show_worker_menu
-        show_worker_menu(chat_id, worker)
+        try:
+            from handlers.worker.profile import show_worker_menu
+            show_worker_menu(chat_id, worker)
+        except ImportError:
+            bot.send_message(chat_id, "Perfil activo. Función de menú no disponible.")
         return
 
-    set_state(chat_id, UserState.WORKER_SELECTING_SERVICES, {
-        "selected_services": []
-    })
+    set_state(chat_id, UserState.WORKER_SELECTING_SERVICES, {"selected_services": []})
 
     text = f"""
 {Icons.BRIEFCASE} <b>Registro de Profesional</b>
@@ -61,14 +56,11 @@ Vamos a configurar tu perfil.
 <b>Paso 1/5:</b> ¿Qué servicios ofrecés?
 {Icons.INFO} Podés seleccionar varios.
     """
-
     send_safe(chat_id, text, get_service_selector([]))
-
 
 # ======================================================
 # ==================== SERVICIOS =======================
 # ======================================================
-
 @bot.callback_query_handler(func=lambda c: c.data.startswith("svc_toggle:"))
 def handle_service_toggle(call):
     chat_id = call.message.chat.id
@@ -80,7 +72,6 @@ def handle_service_toggle(call):
         return
 
     selected = session.data.get("selected_services", [])
-
     if service_id in selected:
         selected.remove(service_id)
         bot.answer_callback_query(call.id, f"❌ {SERVICES[service_id]['name']} removido")
@@ -91,18 +82,15 @@ def handle_service_toggle(call):
     update_data(chat_id, selected_services=selected)
     edit_safe(chat_id, call.message.message_id, call.message.text, get_service_selector(selected))
 
-
 @bot.callback_query_handler(func=lambda c: c.data == "svc_confirm")
 def handle_service_confirm(call):
     chat_id = call.message.chat.id
     selected = get_data(chat_id, "selected_services", [])
-
     if not selected:
         bot.answer_callback_query(call.id, "Seleccioná al menos un servicio", show_alert=True)
         return
 
     bot.answer_callback_query(call.id)
-
     try:
         bot.delete_message(chat_id, call.message.message_id)
     except:
@@ -119,14 +107,11 @@ def handle_service_confirm(call):
         "current_service_idx": 0,
         "prices": {}
     })
-
     ask_next_price(chat_id)
-
 
 # ======================================================
 # ==================== PRECIOS =========================
 # ======================================================
-
 def ask_next_price(chat_id: int):
     services = get_data(chat_id, "services_to_price", [])
     idx = get_data(chat_id, "current_service_idx", 0)
@@ -141,25 +126,19 @@ def ask_next_price(chat_id: int):
 
     text = f"""
 {Icons.MONEY} <b>Precio para {service_name} ({idx+1}/{len(services)})</b>
-
 Ingresá tarifa por hora (solo números)
     """
-
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.add("⏭️ Saltar")
     markup.add("❌ Cancelar")
-
     bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
 
-
 @bot.message_handler(func=lambda m:
-    get_session(m.chat.id)
-    and get_session(m.chat.id).state == UserState.WORKER_ENTERING_PRICE
+    get_session(m.chat.id) and get_session(m.chat.id).state == UserState.WORKER_ENTERING_PRICE
 )
 def handle_price_input(message):
     chat_id = message.chat.id
     text = message.text.strip()
-
     if text == "❌ Cancelar":
         cancel_flow(chat_id)
         return
@@ -179,7 +158,6 @@ def handle_price_input(message):
         return
 
     price = int(text)
-
     prices = get_data(chat_id, "prices", {})
     prices[services[idx]] = price
     update_data(chat_id, prices=prices, current_service_idx=idx + 1)
@@ -187,36 +165,24 @@ def handle_price_input(message):
     bot.send_message(chat_id, f"✅ Precio guardado: ${price}/hora")
     ask_next_price(chat_id)
 
-
 # ======================================================
 # ==================== NOMBRE ==========================
 # ======================================================
-
 def ask_worker_name(chat_id: int):
-    text = f"""
-{Icons.USER} <b>Paso 2/5: Tu nombre</b>
-
-¿Cómo te llaman los clientes?
-    """
-
+    text = f"{Icons.USER} <b>Paso 2/5: Tu nombre</b>\n¿Cómo te llaman los clientes?"
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.add("❌ Cancelar")
-
     bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
 
-
 @bot.message_handler(func=lambda m:
-    get_session(m.chat.id)
-    and get_session(m.chat.id).state == UserState.WORKER_ENTERING_NAME
+    get_session(m.chat.id) and get_session(m.chat.id).state == UserState.WORKER_ENTERING_NAME
 )
 def handle_name_input(message):
     chat_id = message.chat.id
     name = message.text.strip()
-
     if name == "❌ Cancelar":
         cancel_flow(chat_id)
         return
-
     if len(name) < 2:
         bot.send_message(chat_id, "❌ Nombre muy corto.")
         return
@@ -225,96 +191,50 @@ def handle_name_input(message):
     set_state(chat_id, UserState.WORKER_ENTERING_PHONE)
     ask_worker_phone(chat_id)
 
-
 # ======================================================
 # ==================== TELÉFONO ========================
 # ======================================================
-
 def ask_worker_phone(chat_id: int):
-    text = f"""
-{Icons.PHONE} <b>Paso 3/5: Teléfono</b>
-
-Ingresá tu número de contacto.
-"""
-
+    text = f"{Icons.PHONE} <b>Paso 3/5: Teléfono</b>\nIngresá tu número de contacto."
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.add(types.KeyboardButton("❌ Cancelar"))
+    bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
 
-    bot.send_message(
-        chat_id,
-        text,
-        reply_markup=markup,
-        parse_mode="HTML"
-    )
-
-
-@bot.message_handler(func=lambda m: (
-    m.text is not None and
-    get_session(m.chat.id) is not None and
-    get_session(m.chat.id).state == UserState.WORKER_ENTERING_PHONE
-))
+@bot.message_handler(func=lambda m:
+    m.text and get_session(m.chat.id) and get_session(m.chat.id).state == UserState.WORKER_ENTERING_PHONE
+)
 def handle_phone_input(message):
     chat_id = message.chat.id
-    phone = message.text.strip()
-
-    if phone == "❌ Cancelar":
+    phone = re.sub(r"\D", "", message.text.strip())
+    if message.text == "❌ Cancelar":
         cancel_flow(chat_id)
         return
-
-    # Solo números
-    digits = re.sub(r"\D", "", phone)
-
-    if len(digits) < 8:
+    if len(phone) < 8:
         bot.send_message(chat_id, "❌ Número inválido. Ingresá al menos 8 dígitos.")
         return
 
-    # Guardar número limpio
-    update_data(chat_id, worker_phone=digits)
-
-    # Cambiar estado
+    update_data(chat_id, worker_phone=phone)
     set_state(chat_id, UserState.WORKER_ENTERING_DNI)
-
-    # Ir al siguiente paso
     ask_worker_dni(chat_id)
-
 
 # ======================================================
 # ==================== DNI =============================
 # ======================================================
-
 def ask_worker_dni(chat_id: int):
-    text = f"""
-{Icons.USER} <b>Paso 4/5: DNI</b>
-
-Ingresá tu documento (7 u 8 dígitos).
-"""
-
+    text = f"{Icons.USER} <b>Paso 4/5: DNI</b>\nIngresá tu documento (7 u 8 dígitos)."
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.add(types.KeyboardButton("❌ Cancelar"))
+    bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
 
-    bot.send_message(
-        chat_id,
-        text,
-        reply_markup=markup,
-        parse_mode="HTML"
-    )
-
-
-@bot.message_handler(func=lambda m: (
-    m.text is not None and
-    get_session(m.chat.id) is not None and
-    get_session(m.chat.id).state == UserState.WORKER_ENTERING_DNI
-))
+@bot.message_handler(func=lambda m:
+    m.text and get_session(m.chat.id) and get_session(m.chat.id).state == UserState.WORKER_ENTERING_DNI
+)
 def handle_dni_input(message):
     chat_id = message.chat.id
-    text = message.text.strip()
-
-    if text == "❌ Cancelar":
+    dni = re.sub(r"\D", "", message.text.strip())
+    if message.text == "❌ Cancelar":
         cancel_flow(chat_id)
         return
-
-    dni = re.sub(r"\D", "", text)
-
     if not (7 <= len(dni) <= 8):
         bot.send_message(chat_id, "❌ DNI inválido. Debe tener 7 u 8 dígitos.")
         return
@@ -329,30 +249,20 @@ def handle_dni_input(message):
     set_state(chat_id, UserState.WORKER_SHARING_LOCATION)
     ask_worker_location(chat_id)
 
-
 # ======================================================
 # ==================== UBICACIÓN =======================
 # ======================================================
-
 def ask_worker_location(chat_id: int):
-    text = f"""
-{Icons.LOCATION} <b>Paso 5/5: Ubicación</b>
-
-Tocá el botón azul para enviar tu ubicación.
-    """
-
+    text = f"{Icons.LOCATION} <b>Paso 5/5: Ubicación</b>\nTocá el botón azul para enviar tu ubicación."
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     markup.add(types.KeyboardButton("📍 Enviar ubicación", request_location=True))
     markup.add("❌ Cancelar")
-
     bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
-
 
 @bot.message_handler(content_types=['location'])
 def handle_location(message):
     chat_id = message.chat.id
     session = get_session(chat_id)
-
     if not session or session.state != UserState.WORKER_SHARING_LOCATION:
         return
 
@@ -361,13 +271,12 @@ def handle_location(message):
     timestamp = int(time.time())
 
     db_execute("""
-        UPDATE workers 
+        UPDATE workers
         SET lat = ?, lon = ?, last_update = ?, disponible = 1
         WHERE chat_id = ?
     """, (lat, lon, timestamp, str(chat_id)), commit=True)
 
     clear_state(chat_id)
-
     bot.send_message(
         chat_id,
         f"{Icons.PARTY} <b>¡Registro completado!</b>\n\nYa estás activo 💪",
@@ -375,22 +284,16 @@ def handle_location(message):
         reply_markup=types.ReplyKeyboardRemove()
     )
 
-
 # ======================================================
 # ==================== UTIL ============================
 # ======================================================
-
 def cancel_flow(chat_id: int):
     clear_state(chat_id)
-    bot.send_message(
-        chat_id,
-        "Registro cancelado.",
-        reply_markup=types.ReplyKeyboardRemove()
-    )
+    bot.send_message(chat_id, "Registro cancelado.", reply_markup=types.ReplyKeyboardRemove())
+
 # ======================================================
 # ================= GUARDAR WORKER =====================
 # ======================================================
-
 def save_worker_data(chat_id: int, dni: str):
     name = get_data(chat_id, "worker_name")
     phone = get_data(chat_id, "worker_phone")
@@ -398,8 +301,8 @@ def save_worker_data(chat_id: int, dni: str):
     selected_services = get_data(chat_id, "selected_services", [])
 
     db_execute("""
-        UPDATE workers 
-        SET name = ?, phone = ?, dni = ?, services = ?, prices = ?
+        UPDATE workers
+        SET nombre = ?, telefono = ?, dni_file_id = ?, services = ?, prices = ?
         WHERE chat_id = ?
     """, (
         name,
@@ -413,10 +316,8 @@ def save_worker_data(chat_id: int, dni: str):
 # ======================================================
 # ==================== POLLING =========================
 # ======================================================
-
 if __name__ == "__main__":
     logger.info("Bot iniciado en modo POLLING")
-
     while True:
         try:
             bot.infinity_polling(
