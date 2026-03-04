@@ -235,18 +235,24 @@ def ask_worker_phone(chat_id: int):
 {Icons.PHONE} <b>Paso 3/5: Teléfono</b>
 
 Ingresá tu número de contacto.
-    """
+"""
 
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add("❌ Cancelar")
+    markup.add(types.KeyboardButton("❌ Cancelar"))
 
-    bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
+    bot.send_message(
+        chat_id,
+        text,
+        reply_markup=markup,
+        parse_mode="HTML"
+    )
 
 
-@bot.message_handler(func=lambda m:
-    get_session(m.chat.id)
-    and get_session(m.chat.id).state == UserState.WORKER_ENTERING_PHONE
-)
+@bot.message_handler(func=lambda m: (
+    m.text is not None and
+    get_session(m.chat.id) is not None and
+    get_session(m.chat.id).state == UserState.WORKER_ENTERING_PHONE
+))
 def handle_phone_input(message):
     chat_id = message.chat.id
     phone = message.text.strip()
@@ -255,13 +261,20 @@ def handle_phone_input(message):
         cancel_flow(chat_id)
         return
 
-    digits = re.sub(r'\D', '', phone)
+    # Solo números
+    digits = re.sub(r"\D", "", phone)
+
     if len(digits) < 8:
-        bot.send_message(chat_id, "❌ Número inválido.")
+        bot.send_message(chat_id, "❌ Número inválido. Ingresá al menos 8 dígitos.")
         return
 
-    update_data(chat_id, worker_phone=phone)
+    # Guardar número limpio
+    update_data(chat_id, worker_phone=digits)
+
+    # Cambiar estado
     set_state(chat_id, UserState.WORKER_ENTERING_DNI)
+
+    # Ir al siguiente paso
     ask_worker_dni(chat_id)
 
 
