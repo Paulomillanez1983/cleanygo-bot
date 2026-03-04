@@ -1,14 +1,12 @@
 #!/usr/bin/env python3
 """
-CleanyGo Bot - Punto de entrada principal
+CleanyGo Bot - Punto de entrada principal con Webhook
 """
 
 import os
-import signal
 import sys
-import time
-from config import bot, logger
-from utils.icons import Icons
+from flask import Flask, request
+from telebot.types import Update
 
 # Inicializar base de datos primero
 from database import init_db
@@ -16,71 +14,61 @@ init_db()
 
 # Importar handlers (registran sus decorators con el bot)
 from handlers import common
-
-# Handlers de cliente
 from handlers.client import flow as client_flow
 from handlers.client import search
 from handlers.client import callbacks as client_callbacks
-
-# Handlers de trabajador
 from handlers.worker import flow as worker_flow
 from handlers.worker import jobs
 from handlers.worker import profile
 
+from config import bot, logger
+from utils.icons import Icons
 
-def signal_handler(signum, frame):
-    """Maneja señales de terminación graceful"""
-    logger.info(f"{Icons.INFO} Señal recibida: {signum}. Cerrando bot...")
-    bot.stop_polling()
-    sys.exit(0)
+app = Flask(__name__)
 
+@app.route('/')
+def index():
+    """Health check básico"""
+    return '✅ CleanyGo Bot is running!', 200
 
-# Registrar manejadores de señales
-signal.signal(signal.SIGTERM, signal_handler)
-signal.signal(signal.SIGINT, signal_handler)
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    """Recibe actualizaciones de Telegram"""
+    if request.headers.get('content-type') == 'application/json':
+        json_string = request.get_data().decode('utf-8')
+        update = Update.de_json(json_string)
+        bot.process_new_updates([update])
+        return '', 200
+    else:
+        return 'Forbidden', 403
 
+def setup_webhook():
+    """Configura el webhook con Railway"""
+    # Obtener el dominio público de Railway
+    railway_domain = os.getenv('RAILWAY_PUBLIC_DOMAIN')
+    
+    if not railway_domain:
+        logger.error("❌ RAILWAY_PUBLIC_DOMAIN no está configurado")
+        sys.exit(1)
+    
+    webhook_url = f"https://{railway_domain}/webhook"
+    
+    # Eliminar webhook anterior y configurar nuevo
+    bot.remove_webhook()
+    bot.set_webhook(url=webhook_url)
+    
+    logger.info(f"✅ Webhook configurado: {webhook_url}")
+    return webhook_url
 
 if __name__ == "__main__":
-    logger.info(f"{Icons.SUCCESS} Bot CleanyGo iniciado en modo POLLING")
+    logger.info(f"{Icons.SUCCESS} Bot CleanyGo iniciando...")
     
-    # Esperar un poco si hay otro contenedor corriendo (evita conflicto 409)
-    time.sleep(2)
-
-    try:
-        # Eliminar webhook si existe
-        bot.remove_webhook()
-        logger.info("Webhook eliminado correctamente")
-
-        # Intentar polling con reintentos
-        retry_count = 0
-        max_retries = 3
-        
-        while retry_count < max_retries:
-            try:
-                logger.info(f"Intento {retry_count + 1}/{max_retries} de polling...")
-                
-                bot.infinity_polling(
-                    timeout=60,
-                    long_polling_timeout=60,
-                    skip_pending=True,
-                    none_stop=False  # Permite que se detenga con señales
-                )
-                
-                # Si llega aquí, el polling terminó normalmente
-                break
-                
-            except Exception as e:
-                retry_count += 1
-                logger.error(f"Error en polling: {e}")
-                
-                if retry_count < max_retries:
-                    wait_time = 5 * retry_count
-                    logger.info(f"Reintentando en {wait_time} segundos...")
-                    time.sleep(wait_time)
-                else:
-                    logger.error("Máximo de reintentos alcanzado")
-                    raise
-
-    except Exception as e:
-        logger.error(f"Error crítico: {e}")
-        sys.exit(1)
+    # Configurar webhook
+    setup_webhook()
+    
+    # Obtener puerto de Railway
+    port = int(os.environ.get('PORT', 5000))
+    
+    # Iniciar Flask
+    logger.info(f"🚀 Servidor iniciando en puerto {port}")
+    app.run(host='0.0.0.0', port=port)
