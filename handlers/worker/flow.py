@@ -110,11 +110,7 @@ def handle_service_confirm(call):
         except:
             pass
 
-        db_execute(
-            "INSERT OR IGNORE INTO workers (chat_id, disponible) VALUES (?, 0)",
-            (str(chat_id),),
-            commit=True
-        )
+        # Eliminado: INSERT inicial redundante. Ahora save_worker_data maneja todo con INSERT OR REPLACE
 
         set_state(chat_id, UserState.WORKER_ENTERING_PRICE, {
             "services_to_price": selected[:],
@@ -301,7 +297,7 @@ def handle_location(message):
         session = get_session(chat_id)
 
         if not session or session.state != UserState.WORKER_SHARING_LOCATION:
-            logger.info(f"[LOCATION] chat_id={chat_id} no está en paso de ubicación")
+            logger.info(f"[LOCATION] chat_id={chat_id} no está en paso de ubicación (estado: {getattr(session, 'state', 'None')})")
             return
 
         if not message.location:
@@ -314,11 +310,27 @@ def handle_location(message):
 
         logger.info(f"[LOCATION] chat_id={chat_id} lat={lat} lon={lon}")
 
+        # DEBUG: Verificar que el worker existe antes de actualizar
+        debug_worker = db_execute(
+            "SELECT chat_id, nombre FROM workers WHERE chat_id = ?",
+            (str(chat_id),),
+            fetch_one=True
+        )
+        logger.info(f"[DEBUG] Worker encontrado antes de UPDATE: {debug_worker}")
+
+        if not debug_worker:
+            logger.error(f"[LOCATION] Worker no existe para chat_id={chat_id}")
+            bot.send_message(chat_id, "❌ Error: No se encontró tu perfil. Por favor reiniciá el registro con /start")
+            return
+
+        # Ejecutar UPDATE
         db_execute("""
             UPDATE workers
             SET lat = ?, lon = ?, last_update = ?, disponible = 1
             WHERE chat_id = ?
         """, (lat, lon, timestamp, str(chat_id)), commit=True)
+
+        logger.info(f"[LOCATION] UPDATE ejecutado para chat_id={chat_id}")
 
         bot.send_message(
             chat_id,
@@ -363,21 +375,40 @@ def save_worker_data(chat_id: int, dni: str):
         prices = get_data(chat_id, "prices", {})
         selected_services = get_data(chat_id, "selected_services", [])
 
+        # CORRECCIÓN CLAVE: Usar INSERT OR REPLACE para asegurar que el registro exista
+        # y actualizar todos los campos de una vez
         db_execute("""
-            UPDATE workers
-            SET nombre = ?, telefono = ?, dni_file_id = ?, services = ?, prices = ?
-            WHERE chat_id = ?
+            INSERT OR REPLACE INTO workers 
+            (chat_id, nombre, telefono, dni_file_id, services, prices, disponible, lat, lon, last_update)
+            VALUES (?, ?, ?, ?, ?, ?, 0, NULL, NULL, NULL)
         """, (
+            str(chat_id),
             name,
             phone,
             dni,
             ",".join(selected_services),
-            str(prices),
-            str(chat_id)
+            str(prices)
         ), commit=True)
+        
+        logger.info(f"[WORKER SAVED] chat_id={chat_id}, name={name}, services={len(selected_services)}")
+        
     except Exception as e:
         logger.error(f"[SAVE WORKER ERROR] chat_id={chat_id} -> {e}")
-        bot.send_message(chat_id, "❌ Error guardando datos del trabajador.")
+        # Propagar el error para que el flujo sepa que falló
+        raise
+
+def cancel_flow(chat_id: int):
+    """Cancela el flujo de registro y limpia la sesión"""
+    try:
+        clear_state(chat_id)
+        bot.send_message(
+            chat_id,
+            "❌ Registro cancelado. Podés reiniciar cuando quieras escribiendo 'trabajar'.",
+            reply_markup=types.ReplyKeyboardRemove()
+        )
+        logger.info(f"[FLOW CANCELLED] chat_id={chat_id}")
+    except Exception as e:
+        logger.error(f"[CANCEL ERROR] chat_id={chat_id} -> {e}")
 
 # ======================================================
 # ==================== POLLING =========================
