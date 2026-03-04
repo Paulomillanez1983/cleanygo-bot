@@ -15,9 +15,9 @@
     }
   },
   "deploy": {
-    "startCommand": "python bot.py",
+    "startCommand": "python main.py",
     "restartPolicyType": "ALWAYS",
-    "restartPolicyMaxRetries": 3,
+    "restartPolicyMaxRetries": 10,
     "sleepApplication": false
   }
 }
