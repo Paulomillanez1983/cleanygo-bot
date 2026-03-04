@@ -1,11 +1,19 @@
-# handlers/worker/__init__.py
+# handlers/__init__.py
 """
-Módulo de handlers para trabajadores/profesionales.
+Módulo de handlers - Punto de entrada principal.
+Evita imports circulares importando solo lo necesario.
 """
 
-# Importar módulos de worker
-from . import jobs
-from . import profile
+# Handlers comunes (sin dependencias problemáticas)
+from . import common
 
-# No importar desde client aquí - evita ciclos circulares
-# Las funciones compartidas se importan lazy dentro de las funciones que las necesitan
+# Handlers de worker - importar desde el subpaquete worker
+from .worker import jobs
+from .worker import profile
+
+# Handlers de client - importar desde el subpaquete client
+from .client import search
+from .client import callbacks
+# flow se importa lazy cuando se necesita para evitar ciclos
+
+# No importar nada más aquí - los handlers se registran vía decoradores @bot.message_handler
