@@ -388,11 +388,5 @@ if __name__ == "__main__":
     app.run(host='0.0.0.0', port=PORT, debug=False)
 # ==================== DEBUG ====================
 
-@bot.message_handler(func=lambda m: True, content_types=['text'])
-def debug_all_messages(message):
-    session = get_session(message.chat.id)
-
-    logger.debug(
-        f"[DEBUG] Texto: '{message.text}' | chat_id: {message.chat.id} | "
-        f"estado: {session.state if session else 'None'}"
-    )
+@bot.message_handler(func=lambda m: m.text == "💼 Quiero trabajar")
+def handle_worker_start(message):
