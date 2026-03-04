@@ -1,3 +1,8 @@
+# handlers/worker/jobs.py
+"""
+Handlers para gestión de trabajos/asignaciones para profesionales.
+"""
+
 from telebot import types
 from config import bot, logger
 from models.user_state import set_state, UserState
@@ -6,8 +11,10 @@ from utils.icons import Icons
 from utils.keyboards import get_job_response_keyboard
 from services.request_service import get_request, assign_worker_to_request
 from handlers.common import send_safe, edit_safe
-from handlers.client.flow import get_service_display
 import time
+
+# NOTA: No importar get_service_display aquí arriba - causa ciclo circular
+# Se importa lazy dentro de las funciones que lo necesitan
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("job_accept:"))
 def handle_job_accept(call):
@@ -39,6 +46,9 @@ def handle_job_accept(call):
     client_id = request[1]
     service_id = request[2]
     hora = request[4]
+    
+    # ✅ LAZY IMPORT: Importar aquí dentro de la función para evitar ciclo circular
+    from handlers.client.flow import get_service_display
     
     client_text = f"""
 {Icons.PARTY} <b>¡Encontramos tu profesional!</b>
