@@ -30,17 +30,7 @@ def webhook():
         return 'OK', 200
     abort(403)
 
-# ==================== DEBUG ====================
 
-@bot.message_handler(func=lambda m: True, content_types=['text'])
-def debug_all_messages(message):
-    session = get_session(message.chat.id)
-
-    # Solo loguea si no hay estado activo
-    if not session:
-        logger.debug(
-            f"[DEBUG] Recibido: '{message.text}' | chat_id: {message.chat.id}"
-        )
 # ==================== FLUJO TRABAJADOR ====================
 
 @bot.message_handler(regexp=r'(?i)(trabajar|prestador|quiero trabajar)')
@@ -396,3 +386,14 @@ if __name__ == "__main__":
         exit(1)
 
     app.run(host='0.0.0.0', port=PORT, debug=False)
+# ==================== DEBUG ====================
+
+@bot.message_handler(func=lambda m: True, content_types=['text'])
+def debug_all_messages(message):
+    session = get_session(message.chat.id)
+
+    # Solo loguea si no hay estado activo
+    if not session:
+        logger.debug(
+            f"[DEBUG] Recibido: '{message.text}' | chat_id: {message.chat.id}"
+        )
