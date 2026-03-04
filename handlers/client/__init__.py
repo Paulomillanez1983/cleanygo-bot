@@ -6,3 +6,5 @@
 from .flow import flow
 from . import search
 from . import callbacks
+# Al final de handlers/client/flow.py
+flow = True  # o cualquier valor, solo para satisfacer el import
