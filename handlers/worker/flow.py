@@ -388,5 +388,8 @@ if __name__ == "__main__":
     app.run(host='0.0.0.0', port=PORT, debug=False)
 # ==================== DEBUG ====================
 
-@bot.message_handler(func=lambda m: m.text == "💼 Quiero trabajar")
+@bot.message_handler(func=lambda m: m.text and "trabajar" in m.text.lower())
 def handle_worker_start(message):
+    chat_id = message.chat.id
+    logger.info(f"[START WORKER] Activado por '{message.text}' | chat_id: {chat_id}")
+    start_worker_flow(chat_id)
