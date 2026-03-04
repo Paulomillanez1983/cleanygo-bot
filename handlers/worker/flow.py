@@ -110,8 +110,6 @@ def handle_service_confirm(call):
         except:
             pass
 
-        # Eliminado: INSERT inicial redundante. Ahora save_worker_data maneja todo con INSERT OR REPLACE
-
         set_state(chat_id, UserState.WORKER_ENTERING_PRICE, {
             "services_to_price": selected[:],
             "current_service_idx": 0,
@@ -290,14 +288,28 @@ def ask_worker_location(chat_id: int):
     except Exception as e:
         logger.error(f"[ASK LOCATION ERROR] chat_id={chat_id} -> {e}")
 
+# CORRECCIÓN CRÍTICA: Handler de ubicación con prioridad y logging detallado
 @bot.message_handler(content_types=['location'])
 def handle_location(message):
+    chat_id = message.chat.id
+    
+    # LOG INMEDIATO para ver si se ejecuta
+    logger.info(f"[LOCATION RECEIVED] chat_id={chat_id}, location={message.location}")
+    
     try:
-        chat_id = message.chat.id
         session = get_session(chat_id)
-
-        if not session or session.state != UserState.WORKER_SHARING_LOCATION:
-            logger.info(f"[LOCATION] chat_id={chat_id} no está en paso de ubicación (estado: {getattr(session, 'state', 'None')})")
+        
+        # DEBUG: Log del estado actual
+        logger.info(f"[LOCATION DEBUG] session={session}, state={getattr(session, 'state', 'NO SESSION')}")
+        
+        # Si no hay sesión o no está en paso de ubicación, ignorar silenciosamente
+        # pero loggear para debug
+        if not session:
+            logger.info(f"[LOCATION IGNORED] No session for chat_id={chat_id}")
+            return
+            
+        if session.state != UserState.WORKER_SHARING_LOCATION:
+            logger.info(f"[LOCATION IGNORED] Wrong state: {session.state} != {UserState.WORKER_SHARING_LOCATION}")
             return
 
         if not message.location:
@@ -308,19 +320,19 @@ def handle_location(message):
         lon = message.location.longitude
         timestamp = int(time.time())
 
-        logger.info(f"[LOCATION] chat_id={chat_id} lat={lat} lon={lon}")
+        logger.info(f"[LOCATION PROCESSING] chat_id={chat_id} lat={lat} lon={lon}")
 
-        # DEBUG: Verificar que el worker existe antes de actualizar
+        # Verificar que el worker existe
         debug_worker = db_execute(
             "SELECT chat_id, nombre FROM workers WHERE chat_id = ?",
             (str(chat_id),),
             fetch_one=True
         )
-        logger.info(f"[DEBUG] Worker encontrado antes de UPDATE: {debug_worker}")
+        logger.info(f"[LOCATION DEBUG] Worker found: {debug_worker}")
 
         if not debug_worker:
-            logger.error(f"[LOCATION] Worker no existe para chat_id={chat_id}")
-            bot.send_message(chat_id, "❌ Error: No se encontró tu perfil. Por favor reiniciá el registro con /start")
+            logger.error(f"[LOCATION ERROR] Worker not found for chat_id={chat_id}")
+            bot.send_message(chat_id, "❌ Error: Perfil no encontrado. Reiniciá con /start")
             return
 
         # Ejecutar UPDATE
@@ -330,8 +342,9 @@ def handle_location(message):
             WHERE chat_id = ?
         """, (lat, lon, timestamp, str(chat_id)), commit=True)
 
-        logger.info(f"[LOCATION] UPDATE ejecutado para chat_id={chat_id}")
+        logger.info(f"[LOCATION SUCCESS] Updated worker {chat_id}")
 
+        # Mensaje de éxito
         bot.send_message(
             chat_id,
             f"{Icons.PARTY} <b>¡Registro completado!</b>\n\nYa estás activo 💪",
@@ -339,7 +352,7 @@ def handle_location(message):
             reply_markup=types.ReplyKeyboardRemove()
         )
 
-        # Mostrar menú protegido
+        # Mostrar menú
         try:
             from handlers.worker.profile import show_worker_menu
             bot.send_chat_action(chat_id, 'typing')
@@ -352,18 +365,15 @@ def handle_location(message):
                 show_worker_menu(chat_id, worker)
         except Exception as e:
             logger.error(f"[MENU ERROR] chat_id={chat_id} -> {e}")
-            bot.send_message(chat_id, "Tu registro se completó, pero hubo un error mostrando el menú.")
+            bot.send_message(chat_id, "Registro completado, pero error mostrando menú.")
 
-        # Limpiar sesión siempre
-        try:
-            clear_state(chat_id)
-            logger.info(f"[SESSION CLEARED] chat_id={chat_id}")
-        except Exception as e:
-            logger.error(f"[CLEAR STATE ERROR] chat_id={chat_id} -> {e}")
+        # Limpiar sesión
+        clear_state(chat_id)
+        logger.info(f"[SESSION CLEARED] chat_id={chat_id}")
 
     except Exception as e:
-        logger.error(f"[HANDLE_LOCATION ERROR] chat_id={message.chat.id} -> {e}")
-        bot.send_message(chat_id, "❌ Ocurrió un error procesando tu ubicación. Intentá de nuevo.")
+        logger.error(f"[HANDLE_LOCATION ERROR] chat_id={chat_id} -> {e}", exc_info=True)
+        bot.send_message(chat_id, "❌ Error procesando ubicación. Intentá de nuevo o contactá soporte.")
 
 # ======================================================
 # ================= GUARDAR WORKER =====================
@@ -375,8 +385,8 @@ def save_worker_data(chat_id: int, dni: str):
         prices = get_data(chat_id, "prices", {})
         selected_services = get_data(chat_id, "selected_services", [])
 
-        # CORRECCIÓN CLAVE: Usar INSERT OR REPLACE para asegurar que el registro exista
-        # y actualizar todos los campos de una vez
+        logger.info(f"[SAVE WORKER] chat_id={chat_id}, name={name}, services={selected_services}")
+
         db_execute("""
             INSERT OR REPLACE INTO workers 
             (chat_id, nombre, telefono, dni_file_id, services, prices, disponible, lat, lon, last_update)
@@ -390,11 +400,10 @@ def save_worker_data(chat_id: int, dni: str):
             str(prices)
         ), commit=True)
         
-        logger.info(f"[WORKER SAVED] chat_id={chat_id}, name={name}, services={len(selected_services)}")
+        logger.info(f"[SAVE WORKER SUCCESS] chat_id={chat_id}")
         
     except Exception as e:
-        logger.error(f"[SAVE WORKER ERROR] chat_id={chat_id} -> {e}")
-        # Propagar el error para que el flujo sepa que falló
+        logger.error(f"[SAVE WORKER ERROR] chat_id={chat_id} -> {e}", exc_info=True)
         raise
 
 def cancel_flow(chat_id: int):
