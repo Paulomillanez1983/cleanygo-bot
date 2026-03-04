@@ -2,7 +2,8 @@ import os
 import time
 import re
 import logging
-from telebot import types, apihelper
+import traceback
+from telebot import types, apihelper, TeleBot
 from config import bot
 from models.user_state import (
     set_state, update_data, get_data,
@@ -33,10 +34,7 @@ def handle_worker_start(message):
         start_worker_flow(chat_id)
     except Exception as e:
         logger.error(f"[START ERROR] chat_id={chat_id} -> {e}")
-        try:
-            bot.send_message(chat_id, "❌ Ocurrió un error iniciando tu registro. Intentá de nuevo.")
-        except:
-            pass
+        bot.send_message(chat_id, "❌ Ocurrió un error iniciando tu registro. Intentá de nuevo.")
 
 def start_worker_flow(chat_id: int):
     try:
@@ -51,8 +49,7 @@ def start_worker_flow(chat_id: int):
                 from handlers.worker.profile import show_worker_menu
                 bot.send_chat_action(chat_id, 'typing')
                 show_worker_menu(chat_id, worker)
-            except Exception as e:
-                logger.error(f"[SHOW MENU ERROR] {e}")
+            except Exception:
                 bot.send_message(chat_id, "Perfil activo. Función de menú no disponible.")
             return
 
@@ -69,10 +66,7 @@ Vamos a configurar tu perfil.
         send_safe(chat_id, text, get_service_selector([]))
     except Exception as e:
         logger.error(f"[FLOW START ERROR] chat_id={chat_id} -> {e}")
-        try:
-            bot.send_message(chat_id, "❌ Error iniciando flujo de registro.")
-        except:
-            pass
+        bot.send_message(chat_id, "❌ Error iniciando flujo de registro.")
 
 # ======================================================
 # ==================== SERVICIOS =======================
@@ -100,10 +94,7 @@ def handle_service_toggle(call):
         edit_safe(chat_id, call.message.message_id, call.message.text, get_service_selector(selected))
     except Exception as e:
         logger.error(f"[SERVICE TOGGLE ERROR] chat_id={call.message.chat.id} -> {e}")
-        try:
-            bot.answer_callback_query(call.id, "❌ Ocurrió un error.", show_alert=True)
-        except:
-            pass
+        bot.answer_callback_query(call.id, "❌ Ocurrió un error.", show_alert=True)
 
 @bot.callback_query_handler(func=lambda c: c.data == "svc_confirm")
 def handle_service_confirm(call):
@@ -114,8 +105,8 @@ def handle_service_confirm(call):
             bot.answer_callback_query(call.id, "Seleccioná al menos un servicio", show_alert=True)
             return
 
+        bot.answer_callback_query(call.id)
         try:
-            bot.answer_callback_query(call.id)
             bot.delete_message(chat_id, call.message.message_id)
         except:
             pass
@@ -128,10 +119,7 @@ def handle_service_confirm(call):
         ask_next_price(chat_id)
     except Exception as e:
         logger.error(f"[SERVICE CONFIRM ERROR] chat_id={call.message.chat.id} -> {e}")
-        try:
-            bot.answer_callback_query(call.id, "❌ Error confirmando servicios.", show_alert=True)
-        except:
-            pass
+        bot.answer_callback_query(call.id, "❌ Ocurrió un error confirmando servicios.", show_alert=True)
 
 # ======================================================
 # ==================== PRECIOS =========================
@@ -159,10 +147,7 @@ Ingresá tarifa por hora (solo números)
         bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
     except Exception as e:
         logger.error(f"[ASK PRICE ERROR] chat_id={chat_id} -> {e}")
-        try:
-            bot.send_message(chat_id, "❌ Error pidiendo precio.")
-        except:
-            pass
+        bot.send_message(chat_id, "❌ Ocurrió un error pidiendo precio.")
 
 @bot.message_handler(func=lambda m: get_session(m.chat.id) and get_session(m.chat.id).state == UserState.WORKER_ENTERING_PRICE)
 def handle_price_input(message):
@@ -196,10 +181,7 @@ def handle_price_input(message):
         ask_next_price(chat_id)
     except Exception as e:
         logger.error(f"[PRICE INPUT ERROR] chat_id={message.chat.id} -> {e}")
-        try:
-            bot.send_message(message.chat.id, "❌ Error guardando precio.")
-        except:
-            pass
+        bot.send_message(chat_id, "❌ Ocurrió un error guardando el precio.")
 
 # ======================================================
 # ==================== NOMBRE ==========================
@@ -230,10 +212,7 @@ def handle_name_input(message):
         ask_worker_phone(chat_id)
     except Exception as e:
         logger.error(f"[NAME INPUT ERROR] chat_id={message.chat.id} -> {e}")
-        try:
-            bot.send_message(message.chat.id, "❌ Error guardando nombre.")
-        except:
-            pass
+        bot.send_message(chat_id, "❌ Ocurrió un error guardando el nombre.")
 
 # ======================================================
 # ==================== TELÉFONO ========================
@@ -264,10 +243,7 @@ def handle_phone_input(message):
         ask_worker_dni(chat_id)
     except Exception as e:
         logger.error(f"[PHONE INPUT ERROR] chat_id={message.chat.id} -> {e}")
-        try:
-            bot.send_message(message.chat.id, "❌ Error guardando teléfono.")
-        except:
-            pass
+        bot.send_message(chat_id, "❌ Ocurrió un error guardando el teléfono.")
 
 # ======================================================
 # ==================== DNI =============================
@@ -298,10 +274,7 @@ def handle_dni_input(message):
         ask_worker_location(chat_id)
     except Exception as e:
         logger.error(f"[DNI INPUT ERROR] chat_id={message.chat.id} -> {e}")
-        try:
-            bot.send_message(message.chat.id, "❌ Error guardando DNI.")
-        except:
-            pass
+        bot.send_message(chat_id, "❌ Ocurrió un error guardando el DNI.")
 
 # ======================================================
 # ==================== UBICACIÓN =======================
@@ -312,63 +285,71 @@ def ask_worker_location(chat_id: int):
         markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
         markup.add(types.KeyboardButton("📍 Enviar ubicación", request_location=True))
         markup.add("❌ Cancelar")
-        bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
+        msg = bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
+        logger.info(f"[LOCATION PROMPT] Enviado a chat_id={chat_id}, msg_id={msg.message_id}")
     except Exception as e:
         logger.error(f"[ASK LOCATION ERROR] chat_id={chat_id} -> {e}")
 
 # ======================================================
-# HANDLER DE UBICACIÓN - REGISTRADO AL FINAL PARA PRIORIDAD
+# HANDLER DE UBICACIÓN - PRIORIDAD ALTA
 # ======================================================
-logger.info("[INIT] Registrando handler de ubicación...")
+# NOTA: Este handler DEBE estar definido DESPUÉS de los handlers de texto
+# para que los mensajes de texto no sean capturados por él
 
 @bot.message_handler(content_types=['location'])
 def handle_location(message):
-    """Handler para mensajes de ubicación - debe estar registrado después de los handlers de texto"""
+    """
+    Handler para mensajes de ubicación.
+    Se ejecuta cuando el usuario envía una ubicación (pin en el mapa).
+    """
     chat_id = message.chat.id
     
-    logger.info(f"[LOCATION] Recibida ubicación de chat_id={chat_id}")
+    # Log inmediato para confirmar que el handler se ejecutó
+    logger.info(f"[LOCATION HANDLER] EJECUTADO para chat_id={chat_id}")
     
     try:
-        # Obtener sesión con manejo seguro
+        # Obtener sesión
         session = get_session(chat_id)
         
+        # Log de debug del estado
+        current_state = getattr(session, 'state', 'NO_SESSION') if session else 'NO_SESSION'
+        logger.info(f"[LOCATION HANDLER] Estado: {current_state}, Esperado: {UserState.WORKER_SHARING_LOCATION}")
+        
+        # Si no hay sesión o no está en el paso de ubicación, ignorar silenciosamente
         if not session:
-            logger.warning(f"[LOCATION] No hay sesión activa para chat_id={chat_id}")
+            logger.warning(f"[LOCATION HANDLER] Sin sesión para chat_id={chat_id}")
             return
             
-        current_state = getattr(session, 'state', None)
-        logger.info(f"[LOCATION] Estado actual: {current_state}")
-        
-        # Verificar que esté en el paso correcto
-        if current_state != UserState.WORKER_SHARING_LOCATION:
-            logger.info(f"[LOCATION] Ignorado - estado incorrecto: {current_state}")
+        if session.state != UserState.WORKER_SHARING_LOCATION:
+            logger.info(f"[LOCATION HANDLER] Estado incorrecto: {session.state}")
             return
 
-        # Validar ubicación
+        # Validar que venga la ubicación
         if not message.location:
-            logger.error(f"[LOCATION] Mensaje sin objeto location")
+            logger.error(f"[LOCATION HANDLER] message.location es None")
             bot.send_message(
                 chat_id, 
-                "❌ Error al recibir ubicación. Intentá de nuevo.",
+                "❌ No se recibió la ubicación. Intentá de nuevo.",
                 reply_markup=types.ReplyKeyboardRemove()
             )
             return
 
+        # Extraer datos
         lat = message.location.latitude
         lon = message.location.longitude
         timestamp = int(time.time())
+        
+        logger.info(f"[LOCATION HANDLER] Coordenadas: lat={lat}, lon={lon}")
 
-        logger.info(f"[LOCATION] Procesando: lat={lat}, lon={lon}")
-
-        # Verificar worker en DB
+        # Verificar que el worker existe en DB
         worker = db_execute(
-            "SELECT chat_id FROM workers WHERE chat_id = ?",
+            "SELECT chat_id, nombre FROM workers WHERE chat_id = ?",
             (str(chat_id),),
             fetch_one=True
         )
         
         if not worker:
-            logger.error(f"[LOCATION] Worker no existe: {chat_id}")
+            logger.error(f"[LOCATION HANDLER] Worker no encontrado: {chat_id}")
             bot.send_message(
                 chat_id,
                 "❌ Error: Perfil no encontrado. Reiniciá con /start",
@@ -376,24 +357,28 @@ def handle_location(message):
             )
             return
 
-        # Actualizar DB
+        logger.info(f"[LOCATION HANDLER] Worker encontrado: {worker}")
+
+        # Actualizar ubicación en DB
         try:
-            db_execute("""
+            result = db_execute("""
                 UPDATE workers
                 SET lat = ?, lon = ?, last_update = ?, disponible = 1
                 WHERE chat_id = ?
             """, (lat, lon, timestamp, str(chat_id)), commit=True)
-            logger.info(f"[LOCATION] DB actualizada para {chat_id}")
-        except Exception as db_error:
-            logger.error(f"[LOCATION] Error DB: {db_error}")
+            logger.info(f"[LOCATION HANDLER] UPDATE ejecutado: {result}")
+        except Exception as db_err:
+            logger.error(f"[LOCATION HANDLER] Error en UPDATE: {db_err}")
             bot.send_message(
                 chat_id,
-                "❌ Error guardando ubicación. Intentá de nuevo.",
+                "❌ Error guardando ubicación en base de datos.",
                 reply_markup=types.ReplyKeyboardRemove()
             )
             return
 
-        # ÉXITO: Remover teclado y confirmar
+        # ÉXITO: Enviar confirmación y remover teclado
+        logger.info(f"[LOCATION HANDLER] Enviando confirmación de éxito...")
+        
         try:
             bot.send_message(
                 chat_id,
@@ -401,14 +386,14 @@ def handle_location(message):
                 parse_mode="HTML",
                 reply_markup=types.ReplyKeyboardRemove()
             )
-            logger.info(f"[LOCATION] Mensaje de éxito enviado a {chat_id}")
-        except Exception as send_error:
-            logger.error(f"[LOCATION] Error enviando confirmación: {send_error}")
+            logger.info(f"[LOCATION HANDLER] Confirmación enviada")
+        except Exception as send_err:
+            logger.error(f"[LOCATION HANDLER] Error enviando confirmación: {send_err}")
             return
 
         # Mostrar menú del worker
         try:
-            time.sleep(0.3)  # Pequeña pausa
+            time.sleep(0.5)
             from handlers.worker.profile import show_worker_menu
             bot.send_chat_action(chat_id, 'typing')
             
@@ -420,31 +405,29 @@ def handle_location(message):
             
             if worker_data:
                 show_worker_menu(chat_id, worker_data)
-                logger.info(f"[LOCATION] Menú mostrado para {chat_id}")
-                
-        except Exception as menu_error:
-            logger.error(f"[LOCATION] Error mostrando menú: {menu_error}")
-            # No crítico, el registro ya está completo
+                logger.info(f"[LOCATION HANDLER] Menú mostrado")
+        except Exception as menu_err:
+            logger.error(f"[LOCATION HANDLER] Error mostrando menú: {menu_err}")
+            # No es crítico, el registro ya está completo
 
         # Limpiar sesión
         try:
             clear_state(chat_id)
-            logger.info(f"[LOCATION] Sesión limpiada para {chat_id}")
-        except Exception as clear_error:
-            logger.error(f"[LOCATION] Error limpiando sesión: {clear_error}")
+            logger.info(f"[LOCATION HANDLER] Sesión limpiada. FLUJO COMPLETADO.")
+        except Exception as clear_err:
+            logger.error(f"[LOCATION HANDLER] Error limpiando sesión: {clear_err}")
 
     except Exception as e:
-        logger.error(f"[LOCATION] Error crítico: {e}", exc_info=True)
+        logger.error(f"[LOCATION HANDLER] ERROR CRÍTICO: {e}")
+        logger.error(traceback.format_exc())
         try:
             bot.send_message(
                 chat_id,
-                "❌ Error procesando ubicación. Contactá soporte.",
+                "❌ Error crítico procesando ubicación. Contactá soporte.",
                 reply_markup=types.ReplyKeyboardRemove()
             )
         except:
             pass
-
-logger.info("[INIT] Handler de ubicación registrado")
 
 # ======================================================
 # ================= GUARDAR WORKER =====================
@@ -456,7 +439,7 @@ def save_worker_data(chat_id: int, dni: str):
         prices = get_data(chat_id, "prices", {})
         selected_services = get_data(chat_id, "selected_services", [])
 
-        logger.info(f"[SAVE] Guardando worker {chat_id}: {name}")
+        logger.info(f"[SAVE WORKER] chat_id={chat_id}, name={name}, services={len(selected_services)}")
 
         db_execute("""
             INSERT OR REPLACE INTO workers 
@@ -471,14 +454,15 @@ def save_worker_data(chat_id: int, dni: str):
             str(prices)
         ), commit=True)
         
-        logger.info(f"[SAVE] Worker {chat_id} guardado exitosamente")
+        logger.info(f"[SAVE WORKER] Éxito: {chat_id}")
         
     except Exception as e:
-        logger.error(f"[SAVE ERROR] {chat_id}: {e}")
+        logger.error(f"[SAVE WORKER ERROR] {chat_id}: {e}")
+        logger.error(traceback.format_exc())
         raise
 
 def cancel_flow(chat_id: int):
-    """Cancela el flujo de registro"""
+    """Cancela el flujo de registro y limpia la sesión"""
     try:
         clear_state(chat_id)
         bot.send_message(
@@ -486,7 +470,7 @@ def cancel_flow(chat_id: int):
             "❌ Registro cancelado. Escribí 'trabajar' para reiniciar.",
             reply_markup=types.ReplyKeyboardRemove()
         )
-        logger.info(f"[CANCEL] Flujo cancelado para {chat_id}")
+        logger.info(f"[CANCEL] chat_id={chat_id}")
     except Exception as e:
         logger.error(f"[CANCEL ERROR] {chat_id}: {e}")
 
@@ -494,19 +478,31 @@ def cancel_flow(chat_id: int):
 # ==================== POLLING =========================
 # ======================================================
 if __name__ == "__main__":
-    logger.info("=" * 50)
-    logger.info("Bot CleanyGo iniciando...")
-    logger.info("=" * 50)
+    logger.info("=" * 60)
+    logger.info("🚀 Bot CleanyGo iniciando en modo POLLING")
+    logger.info("=" * 60)
     
+    # Verificar que el bot puede conectarse
+    try:
+        me = bot.get_me()
+        logger.info(f"✅ Conectado como @{me.username} (ID: {me.id})")
+    except Exception as e:
+        logger.error(f"❌ Error conectando a Telegram: {e}")
+        exit(1)
+    
+    # Iniciar polling con manejo de errores robusto
     while True:
         try:
-            logger.info("Iniciando infinity_polling...")
+            logger.info("🔄 Iniciando infinity_polling...")
             bot.infinity_polling(
                 timeout=60,
                 long_polling_timeout=30,
                 skip_pending=True,
-                none_stop=True  # No detenerse ante errores de conexión
+                none_stop=True,  # No detenerse ante errores de conexión
+                interval=0      # Sin delay entre polls
             )
         except Exception as e:
-            logger.error(f"Error en polling: {e}")
-            time.sleep(5)
+            logger.error(f"💥 Error en polling: {e}")
+            logger.error(traceback.format_exc())
+            logger.info("⏳ Reintentando en 3 segundos...")
+            time.sleep(3)
