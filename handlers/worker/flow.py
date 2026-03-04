@@ -287,49 +287,47 @@ def ask_worker_dni(chat_id: int):
 {Icons.USER} <b>Paso 4/5: DNI</b>
 
 Ingresá tu documento (7 u 8 dígitos).
-    """
+"""
 
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add("❌ Cancelar")
+    markup.add(types.KeyboardButton("❌ Cancelar"))
 
-    bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
+    bot.send_message(
+        chat_id,
+        text,
+        reply_markup=markup,
+        parse_mode="HTML"
+    )
 
 
-@bot.message_handler(func=lambda m:
-    get_session(m.chat.id)
-    and get_session(m.chat.id).state == UserState.WORKER_ENTERING_DNI
-)
+@bot.message_handler(func=lambda m: (
+    m.text is not None and
+    get_session(m.chat.id) is not None and
+    get_session(m.chat.id).state == UserState.WORKER_ENTERING_DNI
+))
 def handle_dni_input(message):
     chat_id = message.chat.id
-    dni = re.sub(r'\D', '', message.text.strip())
+    text = message.text.strip()
 
-    if not (7 <= len(dni) <= 8):
-        bot.send_message(chat_id, "❌ DNI inválido.")
+    if text == "❌ Cancelar":
+        cancel_flow(chat_id)
         return
 
-    save_worker_data(chat_id, dni)
+    dni = re.sub(r"\D", "", text)
+
+    if not (7 <= len(dni) <= 8):
+        bot.send_message(chat_id, "❌ DNI inválido. Debe tener 7 u 8 dígitos.")
+        return
+
+    try:
+        save_worker_data(chat_id, dni)
+    except Exception as e:
+        logger.error(f"Error guardando trabajador: {e}")
+        bot.send_message(chat_id, "❌ Error interno al guardar datos.")
+        return
+
     set_state(chat_id, UserState.WORKER_SHARING_LOCATION)
     ask_worker_location(chat_id)
-
-
-def save_worker_data(chat_id: int, dni: str):
-    name = get_data(chat_id, "worker_name")
-    phone = get_data(chat_id, "worker_phone")
-    prices = get_data(chat_id, "prices", {})
-    selected_services = get_data(chat_id, "selected_services", [])
-
-    db_execute("""
-        UPDATE workers 
-        SET name = ?, phone = ?, dni = ?, services = ?, prices = ?
-        WHERE chat_id = ?
-    """, (
-        name,
-        phone,
-        dni,
-        ",".join(selected_services),
-        str(prices),
-        str(chat_id)
-    ), commit=True)
 
 
 # ======================================================
