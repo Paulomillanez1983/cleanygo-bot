@@ -46,6 +46,7 @@ def start_worker_flow(chat_id: int):
         if worker:
             try:
                 from handlers.worker.profile import show_worker_menu
+                bot.send_chat_action(chat_id, 'typing')
                 show_worker_menu(chat_id, worker)
             except Exception:
                 bot.send_message(chat_id, "Perfil activo. Función de menú no disponible.")
@@ -326,8 +327,10 @@ def handle_location(message):
             reply_markup=types.ReplyKeyboardRemove()
         )
 
+        # Mostrar menú protegido
         try:
             from handlers.worker.profile import show_worker_menu
+            bot.send_chat_action(chat_id, 'typing')
             worker = db_execute(
                 "SELECT * FROM workers WHERE chat_id = ?",
                 (str(chat_id),),
@@ -339,8 +342,12 @@ def handle_location(message):
             logger.error(f"[MENU ERROR] chat_id={chat_id} -> {e}")
             bot.send_message(chat_id, "Tu registro se completó, pero hubo un error mostrando el menú.")
 
-        clear_state(chat_id)
-        logger.info(f"[SESSION CLEARED] chat_id={chat_id}")
+        # Limpiar sesión siempre
+        try:
+            clear_state(chat_id)
+            logger.info(f"[SESSION CLEARED] chat_id={chat_id}")
+        except Exception as e:
+            logger.error(f"[CLEAR STATE ERROR] chat_id={chat_id} -> {e}")
 
     except Exception as e:
         logger.error(f"[HANDLE_LOCATION ERROR] chat_id={message.chat.id} -> {e}")
