@@ -259,6 +259,7 @@ def ask_worker_location(chat_id: int):
     markup.add("❌ Cancelar")
     bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
 
+
 @bot.message_handler(content_types=['location'])
 def handle_location(message):
     chat_id = message.chat.id
@@ -270,19 +271,35 @@ def handle_location(message):
     lon = message.location.longitude
     timestamp = int(time.time())
 
+    # Guardar ubicación y activar disponibilidad
     db_execute("""
         UPDATE workers
         SET lat = ?, lon = ?, last_update = ?, disponible = 1
         WHERE chat_id = ?
     """, (lat, lon, timestamp, str(chat_id)), commit=True)
 
+    # Limpiar estado de sesión
     clear_state(chat_id)
+
+    # Mensaje de confirmación
     bot.send_message(
         chat_id,
         f"{Icons.PARTY} <b>¡Registro completado!</b>\n\nYa estás activo 💪",
         parse_mode="HTML",
         reply_markup=types.ReplyKeyboardRemove()
     )
+
+    # Mostrar menú principal del trabajador si está disponible
+    try:
+        from handlers.worker.profile import show_worker_menu
+        worker = db_execute(
+            "SELECT * FROM workers WHERE chat_id = ?",
+            (str(chat_id),),
+            fetch_one=True
+        )
+        show_worker_menu(chat_id, worker)
+    except ImportError:
+        bot.send_message(chat_id, "Tu registro está completo, pero el menú de perfil no está disponible.")
 
 # ======================================================
 # ==================== UTIL ============================
