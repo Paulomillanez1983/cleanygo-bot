@@ -288,32 +288,31 @@ def ask_worker_location(chat_id: int):
     except Exception as e:
         logger.error(f"[ASK LOCATION ERROR] chat_id={chat_id} -> {e}")
 
-# CORRECCIÓN CRÍTICA: Handler de ubicación con prioridad y logging detallado
+# CORRECCIÓN CRÍTICA: Handler de ubicación con manejo robusto de teclado
 @bot.message_handler(content_types=['location'])
 def handle_location(message):
     chat_id = message.chat.id
     
-    # LOG INMEDIATO para ver si se ejecuta
-    logger.info(f"[LOCATION RECEIVED] chat_id={chat_id}, location={message.location}")
+    logger.info(f"[LOCATION RECEIVED] chat_id={chat_id}")
     
     try:
         session = get_session(chat_id)
         
         # DEBUG: Log del estado actual
-        logger.info(f"[LOCATION DEBUG] session={session}, state={getattr(session, 'state', 'NO SESSION')}")
+        current_state = getattr(session, 'state', 'NO SESSION')
+        logger.info(f"[LOCATION DEBUG] state={current_state}, expected={UserState.WORKER_SHARING_LOCATION}")
         
-        # Si no hay sesión o no está en paso de ubicación, ignorar silenciosamente
-        # pero loggear para debug
-        if not session:
-            logger.info(f"[LOCATION IGNORED] No session for chat_id={chat_id}")
-            return
-            
-        if session.state != UserState.WORKER_SHARING_LOCATION:
-            logger.info(f"[LOCATION IGNORED] Wrong state: {session.state} != {UserState.WORKER_SHARING_LOCATION}")
+        # Si no está en el paso correcto, ignorar pero loggear
+        if not session or session.state != UserState.WORKER_SHARING_LOCATION:
+            logger.info(f"[LOCATION IGNORED] chat_id={chat_id} not in location step")
             return
 
         if not message.location:
-            bot.send_message(chat_id, "❌ No se detectó ubicación. Tocá el botón azul para enviar.")
+            bot.send_message(
+                chat_id, 
+                "❌ No se detectó ubicación. Tocá el botón azul para enviar.",
+                reply_markup=types.ReplyKeyboardRemove()  # Remover teclado roto
+            )
             return
 
         lat = message.location.latitude
@@ -322,35 +321,45 @@ def handle_location(message):
 
         logger.info(f"[LOCATION PROCESSING] chat_id={chat_id} lat={lat} lon={lon}")
 
-        # Verificar que el worker existe
-        debug_worker = db_execute(
+        # Verificar worker existe
+        worker = db_execute(
             "SELECT chat_id, nombre FROM workers WHERE chat_id = ?",
             (str(chat_id),),
             fetch_one=True
         )
-        logger.info(f"[LOCATION DEBUG] Worker found: {debug_worker}")
-
-        if not debug_worker:
+        
+        if not worker:
             logger.error(f"[LOCATION ERROR] Worker not found for chat_id={chat_id}")
-            bot.send_message(chat_id, "❌ Error: Perfil no encontrado. Reiniciá con /start")
+            # CORRECCIÓN: Remover teclado incluso en error
+            bot.send_message(
+                chat_id,
+                "❌ Error: Perfil no encontrado. Reiniciá con /start",
+                reply_markup=types.ReplyKeyboardRemove()
+            )
             return
 
-        # Ejecutar UPDATE
+        # Actualizar ubicación
         db_execute("""
             UPDATE workers
             SET lat = ?, lon = ?, last_update = ?, disponible = 1
             WHERE chat_id = ?
         """, (lat, lon, timestamp, str(chat_id)), commit=True)
 
-        logger.info(f"[LOCATION SUCCESS] Updated worker {chat_id}")
+        logger.info(f"[LOCATION SUCCESS] Worker {chat_id} updated")
 
-        # Mensaje de éxito
+        # CORRECCIÓN CLAVE: Primero remover teclado explícitamente, luego enviar mensaje de éxito
+        # Esto garantiza que los botones desaparezcan
+        
+        # Paso 1: Enviar mensaje con remove_keyboard
         bot.send_message(
             chat_id,
             f"{Icons.PARTY} <b>¡Registro completado!</b>\n\nYa estás activo 💪",
             parse_mode="HTML",
             reply_markup=types.ReplyKeyboardRemove()
         )
+        
+        # Paso 2: Pequeña pausa para asegurar que Telegram procese el remove
+        time.sleep(0.5)
 
         # Mostrar menú
         try:
@@ -365,15 +374,27 @@ def handle_location(message):
                 show_worker_menu(chat_id, worker)
         except Exception as e:
             logger.error(f"[MENU ERROR] chat_id={chat_id} -> {e}")
-            bot.send_message(chat_id, "Registro completado, pero error mostrando menú.")
+            bot.send_message(
+                chat_id, 
+                "Registro completado. Bienvenido a CleanlyGo!",
+                reply_markup=types.ReplyKeyboardRemove()
+            )
 
         # Limpiar sesión
         clear_state(chat_id)
-        logger.info(f"[SESSION CLEARED] chat_id={chat_id}")
+        logger.info(f"[FLOW COMPLETED] chat_id={chat_id}")
 
     except Exception as e:
         logger.error(f"[HANDLE_LOCATION ERROR] chat_id={chat_id} -> {e}", exc_info=True)
-        bot.send_message(chat_id, "❌ Error procesando ubicación. Intentá de nuevo o contactá soporte.")
+        # CORRECCIÓN: Asegurar que el teclado se remueva incluso en error crítico
+        try:
+            bot.send_message(
+                chat_id,
+                "❌ Error procesando ubicación. Intentá de nuevo o contactá soporte.",
+                reply_markup=types.ReplyKeyboardRemove()
+            )
+        except:
+            pass
 
 # ======================================================
 # ================= GUARDAR WORKER =====================
@@ -385,7 +406,7 @@ def save_worker_data(chat_id: int, dni: str):
         prices = get_data(chat_id, "prices", {})
         selected_services = get_data(chat_id, "selected_services", [])
 
-        logger.info(f"[SAVE WORKER] chat_id={chat_id}, name={name}, services={selected_services}")
+        logger.info(f"[SAVE WORKER] chat_id={chat_id}, name={name}")
 
         db_execute("""
             INSERT OR REPLACE INTO workers 
