@@ -1,3 +1,8 @@
+# handlers/client/flow.py
+"""
+Flujo completo para clientes - Solicitud de servicios.
+"""
+
 from config import bot
 from models.user_state import set_state, update_data, get_data, UserState, get_session
 from models.services_data import SERVICES
@@ -11,6 +16,10 @@ from telebot import types
 import logging
 
 logger = logging.getLogger(__name__)
+
+# ==================== VARIABLE DE FLUJO ====================
+# Requerida para satisfacer: from .flow import flow
+flow = True
 
 # ==================== FLUJO CLIENTE ====================
 
@@ -60,6 +69,7 @@ Servicio: {get_service_display(service_id)}
     edit_safe(chat_id, call.message.message_id, text, get_time_selector())
 
 def get_service_display(service_id: str, with_price: float = None) -> str:
+    """Función compartida para mostrar información de servicios."""
     svc = SERVICES.get(service_id, {})
     text = f"{svc.get('icon', '🔹')} <b>{svc.get('name', service_id)}</b>"
     if with_price:
