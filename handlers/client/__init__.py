@@ -1,3 +1,8 @@
-# handlers/__init__.py
-from .worker import flow  # Primero worker
-from .client import flow  # Después cliente
+# handlers/client/__init__.py
+# ❌ ELIMINAR esta línea:
+# from .worker import flow  # Primero worker
+
+# ✅ SOLO importar lo que existe en client/
+from .flow import flow
+from . import search
+from . import callbacks
