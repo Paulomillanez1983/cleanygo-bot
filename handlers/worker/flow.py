@@ -266,11 +266,14 @@ def handle_location(message):
     session = get_session(chat_id)
 
     if not session or session.state != UserState.WORKER_SHARING_LOCATION:
+        logger.info(f"[LOCATION] chat_id={chat_id} no está en paso de ubicación")
         return
 
     lat = message.location.latitude
     lon = message.location.longitude
     timestamp = int(time.time())
+
+    logger.info(f"[LOCATION] chat_id={chat_id} lat={lat} lon={lon}")
 
     # 1️⃣ Guardar ubicación y activar disponibilidad
     db_execute("""
@@ -279,10 +282,7 @@ def handle_location(message):
         WHERE chat_id = ?
     """, (lat, lon, timestamp, str(chat_id)), commit=True)
 
-    # 2️⃣ Limpiar estado ANTES de mostrar menú
-    clear_state(chat_id)
-
-    # 3️⃣ Mensaje de confirmación
+    # 2️⃣ Mensaje de confirmación
     bot.send_message(
         chat_id,
         f"{Icons.PARTY} <b>¡Registro completado!</b>\n\nYa estás activo 💪",
@@ -290,7 +290,7 @@ def handle_location(message):
         reply_markup=types.ReplyKeyboardRemove()
     )
 
-    # 4️⃣ Mostrar menú principal del trabajador (si existe)
+    # 3️⃣ Mostrar menú principal del trabajador (si existe)
     try:
         from handlers.worker.profile import show_worker_menu
         worker = db_execute(
@@ -300,8 +300,13 @@ def handle_location(message):
         )
         if worker:
             show_worker_menu(chat_id, worker)
-    except ImportError:
-        bot.send_message(chat_id, "Tu registro se completó, pero el menú no está disponible.")
+    except Exception as e:
+        logger.error(f"[MENU ERROR] chat_id={chat_id} -> {e}")
+        bot.send_message(chat_id, "Tu registro se completó, pero hubo un error mostrando el menú.")
+
+    # 4️⃣ Limpiar la sesión AL FINAL
+    clear_state(chat_id)
+    logger.info(f"[SESSION CLEARED] chat_id={chat_id}")
 # ======================================================
 # ================= GUARDAR WORKER =====================
 # ======================================================
