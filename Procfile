@@ -1,2 +1,1 @@
-web: python bot.py
-# worker: python otro_script.py  (si tenés jobs background, dejalo aparte; si no, borralo)
+web: gunicorn --bind 0.0.0.0:$PORT bot:app
