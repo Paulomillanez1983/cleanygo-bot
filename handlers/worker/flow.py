@@ -392,8 +392,7 @@ if __name__ == "__main__":
 def debug_all_messages(message):
     session = get_session(message.chat.id)
 
-    # Solo loguea si no hay estado activo
-    if not session:
-        logger.debug(
-            f"[DEBUG] Recibido: '{message.text}' | chat_id: {message.chat.id}"
-        )
+    logger.debug(
+        f"[DEBUG] Texto: '{message.text}' | chat_id: {message.chat.id} | "
+        f"estado: {session.state if session else 'None'}"
+    )
