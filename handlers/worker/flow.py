@@ -439,26 +439,66 @@ def save_worker_data(chat_id: int, dni: str):
         prices = get_data(chat_id, "prices", {})
         selected_services = get_data(chat_id, "selected_services", [])
 
+        if not name or not phone:
+            raise ValueError("Faltan datos básicos (nombre o teléfono)")
+
         logger.info(f"[SAVE WORKER] chat_id={chat_id}, name={name}, services={len(selected_services)}")
 
+        # 1. Guardar datos básicos del trabajador (SIN services ni prices)
         db_execute("""
             INSERT OR REPLACE INTO workers 
-            (chat_id, nombre, telefono, dni_file_id, services, prices, disponible, lat, lon, last_update)
-            VALUES (?, ?, ?, ?, ?, ?, 0, NULL, NULL, NULL)
+            (chat_id, nombre, telefono, dni_file_id, disponible, lat, lon, last_update)
+            VALUES (?, ?, ?, ?, 0, NULL, NULL, NULL)
         """, (
             str(chat_id),
             name,
             phone,
-            dni,
-            ",".join(selected_services),
-            str(prices)
+            dni   # ← si es string del DNI, está bien; si querés file_id después, cámbialo
         ), commit=True)
-        
-        logger.info(f"[SAVE WORKER] Éxito: {chat_id}")
-        
+
+        # 2. Limpiar servicios anteriores del trabajador
+        db_execute(
+            "DELETE FROM worker_services WHERE chat_id = ?",
+            (str(chat_id),),
+            commit=True
+        )
+
+        # 3. Guardar cada servicio + su precio en la tabla relación
+        for service_id in selected_services:
+            precio = prices.get(service_id)
+            # Si no puso precio → 0.0 o None según prefieras
+            precio = float(precio) if precio is not None else 0.0
+
+            db_execute("""
+                INSERT OR REPLACE INTO worker_services 
+                (chat_id, service_id, precio)
+                VALUES (?, ?, ?)
+            """, (
+                str(chat_id),
+                service_id,
+                precio
+            ), commit=True)
+
+        logger.info(f"[SAVE WORKER] Éxito real: {chat_id} - {len(selected_services)} servicios guardados")
+
+        # Opcional: podés agregar chequeo post-inserción
+        worker_check = db_execute(
+            "SELECT chat_id FROM workers WHERE chat_id = ?",
+            (str(chat_id),),
+            fetch_one=True
+        )
+        if not worker_check:
+            raise RuntimeError("El worker no se creó correctamente")
+
     except Exception as e:
-        logger.error(f"[SAVE WORKER ERROR] {chat_id}: {e}")
+        logger.error(f"[SAVE WORKER CRÍTICO] {chat_id}: {e}")
         logger.error(traceback.format_exc())
+        bot.send_message(
+            chat_id,
+            "❌ Error grave al guardar tu perfil. Intentá de nuevo o contactá soporte.",
+            reply_markup=types.ReplyKeyboardRemove()
+        )
+        clear_state(chat_id)
         raise
 
 def cancel_flow(chat_id: int):
