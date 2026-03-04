@@ -32,10 +32,15 @@ def webhook():
 
 # ==================== DEBUG ====================
 
-@bot.message_handler(func=lambda m: True)
+@bot.message_handler(func=lambda m: True, content_types=['text'])
 def debug_all_messages(message):
-    logger.debug(f"[DEBUG] Recibido: '{message.text}' | chat_id: {message.chat.id} | estado: {get_session(message.chat.id)}")
+    session = get_session(message.chat.id)
 
+    # Solo loguea si no hay estado activo
+    if not session:
+        logger.debug(
+            f"[DEBUG] Recibido: '{message.text}' | chat_id: {message.chat.id}"
+        )
 # ==================== FLUJO TRABAJADOR ====================
 
 @bot.message_handler(regexp=r'(?i)(trabajar|prestador|quiero trabajar)')
