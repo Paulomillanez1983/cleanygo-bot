@@ -387,7 +387,28 @@ def cancel_flow(chat_id: int):
         "Registro cancelado.",
         reply_markup=types.ReplyKeyboardRemove()
     )
+# ======================================================
+# ================= GUARDAR WORKER =====================
+# ======================================================
 
+def save_worker_data(chat_id: int, dni: str):
+    name = get_data(chat_id, "worker_name")
+    phone = get_data(chat_id, "worker_phone")
+    prices = get_data(chat_id, "prices", {})
+    selected_services = get_data(chat_id, "selected_services", [])
+
+    db_execute("""
+        UPDATE workers 
+        SET name = ?, phone = ?, dni = ?, services = ?, prices = ?
+        WHERE chat_id = ?
+    """, (
+        name,
+        phone,
+        dni,
+        ",".join(selected_services),
+        str(prices),
+        str(chat_id)
+    ), commit=True)
 
 # ======================================================
 # ==================== POLLING =========================
