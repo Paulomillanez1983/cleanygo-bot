@@ -1,5 +1,6 @@
-import re
+import os
 import time
+import re
 import logging
 from telebot import types, apihelper
 from config import bot
@@ -13,6 +14,7 @@ from utils.keyboards import get_service_selector
 from handlers.common import send_safe, edit_safe
 from database import db_execute
 
+# ==================== CONFIGURACIÓN ====================
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s"
@@ -20,7 +22,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 apihelper.SESSION_TIME_TO_LIVE = 10 * 60
 
+# ======================================================
 # ==================== FLUJO WORKER ====================
+# ======================================================
 @bot.message_handler(regexp=r'(?i)(trabajar|prestador|quiero trabajar)')
 def handle_worker_start(message):
     chat_id = message.chat.id
@@ -63,7 +67,9 @@ Vamos a configurar tu perfil.
         logger.error(f"[FLOW START ERROR] chat_id={chat_id} -> {e}")
         bot.send_message(chat_id, "❌ Error iniciando flujo de registro.")
 
+# ======================================================
 # ==================== SERVICIOS =======================
+# ======================================================
 @bot.callback_query_handler(func=lambda c: c.data.startswith("svc_toggle:"))
 def handle_service_toggle(call):
     try:
@@ -110,160 +116,281 @@ def handle_service_confirm(call):
             commit=True
         )
 
-        # iniciar flujo refactorizado
-        set_state(chat_id, UserState.WORKER_FLOW, {
-            "step": "price",
+        set_state(chat_id, UserState.WORKER_ENTERING_PRICE, {
             "services_to_price": selected[:],
             "current_service_idx": 0,
-            "prices": {},
-            "worker_name": "",
-            "worker_phone": "",
-            "worker_dni": "",
-            "location": None
+            "prices": {}
         })
-        send_next_step(chat_id)
+        ask_next_price(chat_id)
     except Exception as e:
         logger.error(f"[SERVICE CONFIRM ERROR] chat_id={call.message.chat.id} -> {e}")
         bot.answer_callback_query(call.id, "❌ Ocurrió un error confirmando servicios.", show_alert=True)
 
-# ==================== FLUJO ÚNICO =======================
-FLOW_STEPS = {
-    "price": {
-        "prompt": lambda chat_id: f"{Icons.MONEY} <b>Precio para {SERVICES.get(get_current_service(chat_id), {}).get('name', get_current_service(chat_id))}</b>\nIngresá tarifa por hora (solo números)",
-        "keyboard": lambda: ["⏭️ Saltar", "❌ Cancelar"],
-        "validator": lambda text: text.isdigit() or text in ["⏭️ Saltar", "❌ Cancelar"],
-        "save": lambda chat_id, text: save_price(chat_id, text),
-        "next": lambda chat_id: next_price_or_name(chat_id)
-    },
-    "name": {
-        "prompt": lambda chat_id: f"{Icons.USER} <b>Paso 2/5: Tu nombre</b>\n¿Cómo te llaman los clientes?",
-        "keyboard": lambda: ["❌ Cancelar"],
-        "validator": lambda text: len(text) >= 2 or text == "❌ Cancelar",
-        "save": lambda chat_id, text: update_data(chat_id, worker_name=text),
-        "next": lambda chat_id: set_state(chat_id, UserState.WORKER_FLOW, {"step": "phone"} ) or send_next_step(chat_id)
-    },
-    "phone": {
-        "prompt": lambda chat_id: f"{Icons.PHONE} <b>Paso 3/5: Teléfono</b>\nIngresá tu número de contacto.",
-        "keyboard": lambda: ["❌ Cancelar"],
-        "validator": lambda text: (text.isdigit() and len(re.sub(r"\D", "", text)) >= 8) or text == "❌ Cancelar",
-        "save": lambda chat_id, text: update_data(chat_id, worker_phone=re.sub(r"\D","",text)),
-        "next": lambda chat_id: set_state(chat_id, UserState.WORKER_FLOW, {"step": "dni"} ) or send_next_step(chat_id)
-    },
-    "dni": {
-        "prompt": lambda chat_id: f"{Icons.USER} <b>Paso 4/5: DNI</b>\nIngresá tu documento (7 u 8 dígitos).",
-        "keyboard": lambda: ["❌ Cancelar"],
-        "validator": lambda text: (text.isdigit() and 7 <= len(text) <= 8) or text == "❌ Cancelar",
-        "save": lambda chat_id, text: update_data(chat_id, worker_dni=text),
-        "next": lambda chat_id: set_state(chat_id, UserState.WORKER_FLOW, {"step": "location"} ) or send_next_step(chat_id)
-    },
-    "location": {
-        "prompt": lambda chat_id: f"{Icons.LOCATION} <b>Paso 5/5: Ubicación</b>\nTocá el botón azul para enviar tu ubicación.",
-        "keyboard": lambda: ["📍 Enviar ubicación", "❌ Cancelar"]
-    }
-}
+# ======================================================
+# ==================== PRECIOS =========================
+# ======================================================
+def ask_next_price(chat_id: int):
+    try:
+        services = get_data(chat_id, "services_to_price", [])
+        idx = get_data(chat_id, "current_service_idx", 0)
 
-def get_current_service(chat_id):
-    session = get_session(chat_id)
-    idx = session.data.get("current_service_idx", 0)
-    return session.data.get("services_to_price", [])[idx]
+        if idx >= len(services):
+            set_state(chat_id, UserState.WORKER_ENTERING_NAME)
+            ask_worker_name(chat_id)
+            return
 
-def save_price(chat_id, text):
-    session = get_session(chat_id)
-    idx = session.data.get("current_service_idx",0)
-    prices = session.data.get("prices",{})
-    if text == "⏭️ Saltar":
-        prices[get_current_service(chat_id)] = None
-    else:
-        prices[get_current_service(chat_id)] = int(text)
-    update_data(chat_id, prices=prices, current_service_idx=idx+1)
+        service_id = services[idx]
+        service_name = SERVICES.get(service_id, {}).get("name", service_id)
 
-def next_price_or_name(chat_id):
-    session = get_session(chat_id)
-    if session.data.get("current_service_idx",0) >= len(session.data.get("services_to_price",[])):
-        set_state(chat_id, UserState.WORKER_FLOW, {"step":"name"})
-    send_next_step(chat_id)
+        text = f"""
+{Icons.MONEY} <b>Precio para {service_name} ({idx+1}/{len(services)})</b>
+Ingresá tarifa por hora (solo números)
+        """
+        markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+        markup.add("⏭️ Saltar")
+        markup.add("❌ Cancelar")
+        bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"[ASK PRICE ERROR] chat_id={chat_id} -> {e}")
+        bot.send_message(chat_id, "❌ Ocurrió un error pidiendo precio.")
 
-def send_next_step(chat_id):
-    session = get_session(chat_id)
-    step = session.data.get("step")
-    step_conf = FLOW_STEPS.get(step)
-    if not step_conf:
-        return
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    for btn in step_conf["keyboard"]():
-        if isinstance(btn,str):
-            markup.add(btn)
-        else:
-            markup.add(types.KeyboardButton(btn))
-    bot.send_message(chat_id, step_conf["prompt"](chat_id), reply_markup=markup, parse_mode="HTML")
+@bot.message_handler(func=lambda m: get_session(m.chat.id) and get_session(m.chat.id).state == UserState.WORKER_ENTERING_PRICE)
+def handle_price_input(message):
+    try:
+        chat_id = message.chat.id
+        text = message.text.strip()
+        if text == "❌ Cancelar":
+            cancel_flow(chat_id)
+            return
 
-@bot.message_handler(func=lambda m: get_session(m.chat.id) and get_session(m.chat.id).state == UserState.WORKER_FLOW)
-def handle_flow(message):
-    chat_id = message.chat.id
-    session = get_session(chat_id)
-    step = session.data.get("step")
-    if message.text == "❌ Cancelar":
-        cancel_flow(chat_id)
-        return
-    step_conf = FLOW_STEPS.get(step)
-    if not step_conf:
-        bot.send_message(chat_id,"❌ Paso inválido")
-        return
-    if not step_conf["validator"](message.text):
-        bot.send_message(chat_id,"❌ Valor inválido")
-        return
-    step_conf["save"](chat_id,message.text)
-    if step_conf.get("next"):
-        step_conf["next"](chat_id)
+        services = get_data(chat_id, "services_to_price", [])
+        idx = get_data(chat_id, "current_service_idx", 0)
 
+        if text == "⏭️ Saltar":
+            prices = get_data(chat_id, "prices", {})
+            prices[services[idx]] = None
+            update_data(chat_id, prices=prices, current_service_idx=idx + 1)
+            ask_next_price(chat_id)
+            return
+
+        if not text.isdigit():
+            bot.send_message(chat_id, "❌ Ingresá solo números.")
+            return
+
+        price = int(text)
+        prices = get_data(chat_id, "prices", {})
+        prices[services[idx]] = price
+        update_data(chat_id, prices=prices, current_service_idx=idx + 1)
+
+        bot.send_message(chat_id, f"✅ Precio guardado: ${price}/hora")
+        ask_next_price(chat_id)
+    except Exception as e:
+        logger.error(f"[PRICE INPUT ERROR] chat_id={message.chat.id} -> {e}")
+        bot.send_message(chat_id, "❌ Ocurrió un error guardando el precio.")
+
+# ======================================================
+# ==================== NOMBRE ==========================
+# ======================================================
+def ask_worker_name(chat_id: int):
+    try:
+        text = f"{Icons.USER} <b>Paso 2/5: Tu nombre</b>\n¿Cómo te llaman los clientes?"
+        markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+        markup.add("❌ Cancelar")
+        bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"[ASK NAME ERROR] chat_id={chat_id} -> {e}")
+
+@bot.message_handler(func=lambda m: get_session(m.chat.id) and get_session(m.chat.id).state == UserState.WORKER_ENTERING_NAME)
+def handle_name_input(message):
+    try:
+        chat_id = message.chat.id
+        name = message.text.strip()
+        if name == "❌ Cancelar":
+            cancel_flow(chat_id)
+            return
+        if len(name) < 2:
+            bot.send_message(chat_id, "❌ Nombre muy corto.")
+            return
+
+        update_data(chat_id, worker_name=name)
+        set_state(chat_id, UserState.WORKER_ENTERING_PHONE)
+        ask_worker_phone(chat_id)
+    except Exception as e:
+        logger.error(f"[NAME INPUT ERROR] chat_id={message.chat.id} -> {e}")
+        bot.send_message(chat_id, "❌ Ocurrió un error guardando el nombre.")
+
+# ======================================================
+# ==================== TELÉFONO ========================
+# ======================================================
+def ask_worker_phone(chat_id: int):
+    try:
+        text = f"{Icons.PHONE} <b>Paso 3/5: Teléfono</b>\nIngresá tu número de contacto."
+        markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+        markup.add(types.KeyboardButton("❌ Cancelar"))
+        bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"[ASK PHONE ERROR] chat_id={chat_id} -> {e}")
+
+@bot.message_handler(func=lambda m: m.text and get_session(m.chat.id) and get_session(m.chat.id).state == UserState.WORKER_ENTERING_PHONE)
+def handle_phone_input(message):
+    try:
+        chat_id = message.chat.id
+        phone = re.sub(r"\D", "", message.text.strip())
+        if message.text == "❌ Cancelar":
+            cancel_flow(chat_id)
+            return
+        if len(phone) < 8:
+            bot.send_message(chat_id, "❌ Número inválido. Ingresá al menos 8 dígitos.")
+            return
+
+        update_data(chat_id, worker_phone=phone)
+        set_state(chat_id, UserState.WORKER_ENTERING_DNI)
+        ask_worker_dni(chat_id)
+    except Exception as e:
+        logger.error(f"[PHONE INPUT ERROR] chat_id={message.chat.id} -> {e}")
+        bot.send_message(chat_id, "❌ Ocurrió un error guardando el teléfono.")
+
+# ======================================================
+# ==================== DNI =============================
+# ======================================================
+def ask_worker_dni(chat_id: int):
+    try:
+        text = f"{Icons.USER} <b>Paso 4/5: DNI</b>\nIngresá tu documento (7 u 8 dígitos)."
+        markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+        markup.add(types.KeyboardButton("❌ Cancelar"))
+        bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"[ASK DNI ERROR] chat_id={chat_id} -> {e}")
+
+@bot.message_handler(func=lambda m: m.text and get_session(m.chat.id) and get_session(m.chat.id).state == UserState.WORKER_ENTERING_DNI)
+def handle_dni_input(message):
+    try:
+        chat_id = message.chat.id
+        dni = re.sub(r"\D", "", message.text.strip())
+        if message.text == "❌ Cancelar":
+            cancel_flow(chat_id)
+            return
+        if not (7 <= len(dni) <= 8):
+            bot.send_message(chat_id, "❌ DNI inválido. Debe tener 7 u 8 dígitos.")
+            return
+
+        save_worker_data(chat_id, dni)
+        set_state(chat_id, UserState.WORKER_SHARING_LOCATION)
+        ask_worker_location(chat_id)
+    except Exception as e:
+        logger.error(f"[DNI INPUT ERROR] chat_id={message.chat.id} -> {e}")
+        bot.send_message(chat_id, "❌ Ocurrió un error guardando el DNI.")
+
+# ======================================================
 # ==================== UBICACIÓN =======================
+# ======================================================
+def ask_worker_location(chat_id: int):
+    try:
+        text = f"{Icons.LOCATION} <b>Paso 5/5: Ubicación</b>\nTocá el botón azul para enviar tu ubicación."
+        markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+        markup.add(types.KeyboardButton("📍 Enviar ubicación", request_location=True))
+        markup.add("❌ Cancelar")
+        bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"[ASK LOCATION ERROR] chat_id={chat_id} -> {e}")
+
 @bot.message_handler(content_types=['location'])
 def handle_location(message):
-    chat_id = message.chat.id
-    session = get_session(chat_id)
-    if not session or session.data.get("step") != "location":
-        return
-    if not message.location:
-        bot.send_message(chat_id,"❌ No se detectó ubicación.")
-        return
-    lat, lon = message.location.latitude, message.location.longitude
-    timestamp = int(time.time())
-    update_data(chat_id, location=(lat,lon))
-    worker_data = get_session(chat_id).data
-    # Guardar en DB
-    db_execute("""
-        UPDATE workers
-        SET lat=?, lon=?, last_update=?, disponible=1,
-            nombre=?, telefono=?, dni_file_id=?, services=?, prices=?
-        WHERE chat_id=?
-    """,(
-        lat, lon, timestamp,
-        worker_data.get("worker_name"),
-        worker_data.get("worker_phone"),
-        worker_data.get("worker_dni"),
-        ",".join(worker_data.get("services_to_price",[])),
-        str(worker_data.get("prices",{})),
-        str(chat_id)
-    ), commit=True)
-    bot.send_message(chat_id,f"{Icons.PARTY} <b>¡Registro completado!</b>\n\nYa estás activo 💪",
-                     parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
     try:
-        from handlers.worker.profile import show_worker_menu
-        bot.send_chat_action(chat_id,'typing')
-        worker = db_execute("SELECT * FROM workers WHERE chat_id=?",(str(chat_id),),fetch_one=True)
-        if worker: show_worker_menu(chat_id,worker)
-    except Exception as e:
-        logger.error(f"[MENU ERROR] chat_id={chat_id} -> {e}")
-        bot.send_message(chat_id,"Tu registro se completó, pero hubo un error mostrando el menú.")
-    clear_state(chat_id)
-    logger.info(f"[SESSION CLEARED] chat_id={chat_id}")
+        chat_id = message.chat.id
+        session = get_session(chat_id)
 
+        if not session or session.state != UserState.WORKER_SHARING_LOCATION:
+            logger.info(f"[LOCATION] chat_id={chat_id} no está en paso de ubicación")
+            return
+
+        if not message.location:
+            bot.send_message(chat_id, "❌ No se detectó ubicación. Tocá el botón azul para enviar.")
+            return
+
+        lat = message.location.latitude
+        lon = message.location.longitude
+        timestamp = int(time.time())
+
+        logger.info(f"[LOCATION] chat_id={chat_id} lat={lat} lon={lon}")
+
+        db_execute("""
+            UPDATE workers
+            SET lat = ?, lon = ?, last_update = ?, disponible = 1
+            WHERE chat_id = ?
+        """, (lat, lon, timestamp, str(chat_id)), commit=True)
+
+        bot.send_message(
+            chat_id,
+            f"{Icons.PARTY} <b>¡Registro completado!</b>\n\nYa estás activo 💪",
+            parse_mode="HTML",
+            reply_markup=types.ReplyKeyboardRemove()
+        )
+
+        # Mostrar menú protegido
+        try:
+            from handlers.worker.profile import show_worker_menu
+            bot.send_chat_action(chat_id, 'typing')
+            worker = db_execute(
+                "SELECT * FROM workers WHERE chat_id = ?",
+                (str(chat_id),),
+                fetch_one=True
+            )
+            if worker:
+                show_worker_menu(chat_id, worker)
+        except Exception as e:
+            logger.error(f"[MENU ERROR] chat_id={chat_id} -> {e}")
+            bot.send_message(chat_id, "Tu registro se completó, pero hubo un error mostrando el menú.")
+
+        # Limpiar sesión siempre
+        try:
+            clear_state(chat_id)
+            logger.info(f"[SESSION CLEARED] chat_id={chat_id}")
+        except Exception as e:
+            logger.error(f"[CLEAR STATE ERROR] chat_id={chat_id} -> {e}")
+
+    except Exception as e:
+        logger.error(f"[HANDLE_LOCATION ERROR] chat_id={message.chat.id} -> {e}")
+        bot.send_message(chat_id, "❌ Ocurrió un error procesando tu ubicación. Intentá de nuevo.")
+
+# ======================================================
+# ================= GUARDAR WORKER =====================
+# ======================================================
+def save_worker_data(chat_id: int, dni: str):
+    try:
+        name = get_data(chat_id, "worker_name")
+        phone = get_data(chat_id, "worker_phone")
+        prices = get_data(chat_id, "prices", {})
+        selected_services = get_data(chat_id, "selected_services", [])
+
+        db_execute("""
+            UPDATE workers
+            SET nombre = ?, telefono = ?, dni_file_id = ?, services = ?, prices = ?
+            WHERE chat_id = ?
+        """, (
+            name,
+            phone,
+            dni,
+            ",".join(selected_services),
+            str(prices),
+            str(chat_id)
+        ), commit=True)
+    except Exception as e:
+        logger.error(f"[SAVE WORKER ERROR] chat_id={chat_id} -> {e}")
+        bot.send_message(chat_id, "❌ Error guardando datos del trabajador.")
+
+# ======================================================
 # ==================== POLLING =========================
-if __name__=="__main__":
+# ======================================================
+if __name__ == "__main__":
     logger.info("Bot iniciado en modo POLLING")
     while True:
         try:
-            bot.infinity_polling(timeout=60,long_polling_timeout=30,skip_pending=True)
+            bot.infinity_polling(
+                timeout=60,
+                long_polling_timeout=30,
+                skip_pending=True
+            )
         except Exception as e:
             logger.error(f"Error en polling: {e}")
             time.sleep(10)
