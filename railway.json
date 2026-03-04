@@ -18,6 +18,9 @@
     "startCommand": "python bot.py",
     "restartPolicyType": "ALWAYS",
     "restartPolicyMaxRetries": 10,
-    "sleepApplication": false
+    "sleepApplication": false,
+    "healthcheckPath": "/health",          // ← Agregado: endpoint simple para chequear si vive
+    "healthcheckTimeout": 30000,           // 30 segundos de timeout
+    "healthcheckInterval": 10000           // chequea cada 10 seg
   }
 }
