@@ -70,10 +70,3 @@ def setup_webhook():
     logger.info(f"✅ Webhook configurado: {webhook_url}")
     return webhook_url
 
-if __name__ == "__main__":
-    # Solo para desarrollo local (Railway usa Gunicorn, ignora esto)
-    logger.info(f"{Icons.SUCCESS} Bot CleanyGo iniciando (modo dev)...")
-    setup_webhook()
-    port = int(os.environ.get('PORT', 8080))  # Default 8080 para coincidir con Railway
-    logger.info(f"🚀 Servidor iniciando en puerto {port}")
-    app.run(host='0.0.0.0', port=port, debug=False)
