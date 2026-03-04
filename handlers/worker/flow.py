@@ -265,7 +265,7 @@ def handle_location(message):
     chat_id = message.chat.id
     session = get_session(chat_id)
 
-    # Verificamos que el usuario esté en el paso correcto
+    # Solo procesar si el usuario está en el paso correcto
     if not session or session.state != UserState.WORKER_SHARING_LOCATION:
         return
 
@@ -280,9 +280,6 @@ def handle_location(message):
         WHERE chat_id = ?
     """, (lat, lon, timestamp, str(chat_id)), commit=True)
 
-    # Limpiar estado de sesión
-    clear_state(chat_id)
-
     # Mensaje de confirmación
     bot.send_message(
         chat_id,
@@ -291,7 +288,7 @@ def handle_location(message):
         reply_markup=types.ReplyKeyboardRemove()
     )
 
-    # Mostrar menú principal del trabajador si el módulo está disponible
+    # Mostrar menú principal del trabajador antes de limpiar sesión
     try:
         from handlers.worker.profile import show_worker_menu
         worker = db_execute(
@@ -303,6 +300,9 @@ def handle_location(message):
             show_worker_menu(chat_id, worker)
     except ImportError:
         bot.send_message(chat_id, "Tu registro se completó, pero el menú no está disponible.")
+
+    # Finalmente, limpiar la sesión
+    clear_state(chat_id)
 # ======================================================
 # ================= GUARDAR WORKER =====================
 # ======================================================
