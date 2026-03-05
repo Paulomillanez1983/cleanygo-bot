@@ -144,6 +144,7 @@ def handle_client_accept(call):
         if worker_data:
             try:
                 from handlers.worker.main import show_worker_menu
+                # enviar extra_buttons opcional
                 show_worker_menu(worker_id, worker_data, extra_buttons=[
                     types.InlineKeyboardButton(f"{Icons.PLAY} Iniciar servicio", callback_data=f"start_job:{request_id}")
                 ])
