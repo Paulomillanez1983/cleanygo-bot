@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 CleanyGo Bot - Entrada principal para Railway
+VERSIÓN CORREGIDA: Inyección consistente con config.py
 """
 
 import os
@@ -19,17 +20,17 @@ from telebot import TeleBot
 bot = TeleBot(TOKEN, parse_mode="HTML")
 print(f"[INIT] Bot creado: {id(bot)}", file=sys.stderr)
 
-# ==================== PASO 3: INYECTAR EN CONFIG ====================
-import config
-config.bot = bot
-config.TOKEN = TOKEN
-config.logger.info("Bot inyectado en config")
+# ==================== PASO 3: INYECTAR EN CONFIG (CORREGIDO) ====================
+# ✅ CORREGIDO: Usar inject_bot en lugar de asignación directa
+from config import inject_bot, init_db as config_init_db
+inject_bot(bot)
+print("[INIT] ✅ Bot inyectado en config via inject_bot()", file=sys.stderr)
 
 # ==================== PASO 4: BASE DE DATOS ====================
 try:
-    from database import init_db
-    init_db()
-    print("[INIT] ✅ DB OK", file=sys.stderr)
+    # ✅ Usar init_db desde config que ya tiene la conexión configurada
+    config_init_db()
+    print("[INIT] ✅ DB inicializada desde config", file=sys.stderr)
 except Exception as e:
     print(f"[INIT] ❌ DB Error: {e}", file=sys.stderr)
     raise
@@ -37,6 +38,7 @@ except Exception as e:
 # ==================== PASO 5: CARGAR HANDLERS ====================
 print("[INIT] Cargando handlers...", file=sys.stderr)
 try:
+    # ✅ CORREGIDO: Importar en orden correcto para evitar circular imports
     import handlers.common
     import handlers.client.flow
     import handlers.client.search
@@ -44,6 +46,7 @@ try:
     import handlers.worker.flow
     import handlers.worker.jobs
     import handlers.worker.profile
+    import handlers.worker.main  # ✅ AGREGADO: Importar el main de worker
     print("[INIT] ✅ Handlers cargados", file=sys.stderr)
 except Exception as e:
     print(f"[INIT] ❌ Error handlers: {e}", file=sys.stderr)
@@ -53,7 +56,16 @@ except Exception as e:
 
 print(f"[INIT] Handlers registrados: {len(bot.message_handlers)} message handlers", file=sys.stderr)
 
-# ==================== PASO 6: FLASK APP ====================
+# ==================== PASO 6: INICIALIZAR REQUESTS_DB ====================
+# ✅ AGREGADO: Inicializar tabla de requests
+try:
+    from requests_db import init_requests_table
+    init_requests_table()
+    print("[INIT] ✅ Tabla requests inicializada", file=sys.stderr)
+except Exception as e:
+    print(f"[INIT] ⚠️ Error inicializando requests: {e}", file=sys.stderr)
+
+# ==================== PASO 7: FLASK APP ====================
 from flask import Flask, jsonify, request
 from telebot.types import Update
 
@@ -79,10 +91,11 @@ def webhook():
         update = Update.de_json(json_string)
         bot.process_new_updates([update])
     except Exception as e:
-        config.logger.error(f"[WEBHOOK ERROR] {e}")
+        from config import logger
+        logger.error(f"[WEBHOOK ERROR] {e}")
     return '', 200
 
-# ==================== PASO 7: CONFIGURAR WEBHOOK ====================
+# ==================== PASO 8: CONFIGURAR WEBHOOK ====================
 def setup_webhook():
     try:
         domain = os.environ.get('RAILWAY_PUBLIC_DOMAIN')
