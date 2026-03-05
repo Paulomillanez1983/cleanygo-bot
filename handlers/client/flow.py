@@ -20,37 +20,46 @@ logger = logging.getLogger(__name__)
 # ==================== VARIABLE DE FLUJO ====================
 flow = True
 
-# ==================== FUNCIONES AUXILIARES DE DATOS ====================
+# ==================== FUNCIONES AUXILIARES CRÍTICAS ====================
 
-def get_session_data(chat_id: str) -> dict:
-    """Obtiene TODOS los datos de la sesión de forma segura"""
+def get_full_session(chat_id: str) -> dict:
+    """Obtiene sesión completa: estado + datos"""
+    chat_id = str(chat_id)
     session = get_session(chat_id)
     if not session:
-        return {}
-    return session.get("data", {}) or {}
+        return {"state": UserState.IDLE.value, "data": {}}
+    return session
 
-def save_session_data(chat_id: str, data: dict):
-    """Guarda datos en sesión manteniendo el estado actual"""
-    session = get_session(chat_id)
-    current_state_str = session.get("state", "idle") if session else "idle"
-    try:
-        current_state = UserState(current_state_str)
-    except ValueError:
-        current_state = UserState.IDLE
-    set_state(chat_id, current_state, data)
+def save_state_and_data(chat_id: str, state: UserState, data: dict = None):
+    """
+    Guarda estado Y datos juntos de forma atómica.
+    CRÍTICO: Siempre preserva datos existentes.
+    """
+    chat_id = str(chat_id)
+    
+    # Obtener datos actuales si no se proporcionan nuevos
+    if data is None:
+        current = get_full_session(chat_id)
+        data = current.get("data", {})
+    
+    # Usar update_data para mergear en lugar de reemplazar
+    for key, value in data.items():
+        update_data(chat_id, **{key: value})
+    
+    # Cambiar estado
+    set_state(chat_id, state)
+    
+    logger.info(f"[SAVE] chat_id={chat_id}, state={state.value}, data_keys={list(data.keys())}")
 
 def get_flow_data(chat_id: str, key: str, default=None):
-    """Obtiene un dato específico del flujo"""
-    data = get_session_data(str(chat_id))
-    return data.get(key, default)
-
-def update_flow_data(chat_id: str, **kwargs):
-    """Actualiza múltiples datos en el flujo"""
+    """Obtiene dato del flujo de forma segura"""
     chat_id = str(chat_id)
-    data = get_session_data(chat_id)
-    data.update(kwargs)
-    save_session_data(chat_id, data)
-    logger.info(f"[FLOW DATA] chat_id={chat_id}, updated: {list(kwargs.keys())}")
+    try:
+        return get_data(chat_id, key) or default
+    except:
+        # Fallback: leer directamente de sesión
+        session = get_full_session(chat_id)
+        return session.get("data", {}).get(key, default)
 
 # ==================== FLUJO CLIENTE ====================
 
@@ -61,7 +70,9 @@ def handle_client_start(message):
 def start_client_flow(chat_id: str):
     """Inicia flujo de cliente"""
     chat_id = str(chat_id)
-    set_state(chat_id, UserState.CLIENT_SELECTING_SERVICE)
+    
+    # Limpiar datos anteriores y empezar fresco
+    save_state_and_data(chat_id, UserState.CLIENT_SELECTING_SERVICE, {})
     
     text = f"""
 {Icons.SEARCH} <b>¿Qué servicio necesitás?</b>
@@ -83,14 +94,15 @@ def handle_client_service_selection(call):
     chat_id = str(call.message.chat.id)
     service_id = call.data.split(":")[1]
     
-    # ✅ CORREGIDO: Guardar datos inmediatamente usando update_flow_data
-    update_flow_data(chat_id, 
-        service_id=service_id,
-        service_name=SERVICES[service_id]["name"]
-    )
+    # ✅ Guardar datos Y estado juntos
+    save_state_and_data(chat_id, UserState.CLIENT_SELECTING_TIME, {
+        "service_id": service_id,
+        "service_name": SERVICES[service_id]["name"]
+    })
     
-    # ✅ Cambiar estado DESPUÉS de guardar datos
-    set_state(chat_id, UserState.CLIENT_SELECTING_TIME)
+    # Verificar que se guardó
+    verify = get_flow_data(chat_id, "service_id")
+    logger.info(f"[SERVICE] Guardado: {verify}")
     
     bot.answer_callback_query(call.id, f"Seleccionaste: {SERVICES[service_id]['name']}")
     
@@ -120,8 +132,11 @@ def handle_quick_time(call):
     parts = call.data.split(":")
     time_str = f"{parts[1]}:{parts[2]}"
     
-    # ✅ CORREGIDO: Usar update_flow_data
-    update_flow_data(chat_id, selected_time=time_str, time_period="PM")
+    # ✅ Mergear datos existentes + nuevos
+    current_data = get_full_session(chat_id).get("data", {})
+    current_data.update({"selected_time": time_str, "time_period": "PM"})
+    
+    save_state_and_data(chat_id, UserState.CLIENT_SELECTING_TIME, current_data)
     
     bot.answer_callback_query(call.id, f"Hora: {time_str} PM")
     proceed_to_location(chat_id, call.message.message_id)
@@ -155,8 +170,12 @@ def handle_final_time(call):
     time_str = f"{parts[1]}:{parts[2]}"
     period = parts[3]
     
-    # ✅ CORREGIDO: Usar update_flow_data
-    update_flow_data(chat_id, selected_time=time_str, time_period=period)
+    # ✅ Mergear datos existentes + nuevos
+    current_data = get_full_session(chat_id).get("data", {})
+    current_data.update({"selected_time": time_str, "time_period": period})
+    
+    save_state_and_data(chat_id, UserState.CLIENT_SELECTING_TIME, current_data)
+    
     bot.answer_callback_query(call.id, f"✓ {time_str} {period}")
     proceed_to_location(chat_id, call.message.message_id)
 
@@ -164,20 +183,25 @@ def proceed_to_location(chat_id: str, message_id: int):
     """Pasa a solicitar ubicación"""
     chat_id = str(chat_id)
     
-    # ✅ CORREGIDO: Verificar datos antes de cambiar estado usando get_flow_data
-    service_id = get_flow_data(chat_id, "service_id")
-    time_str = get_flow_data(chat_id, "selected_time")
-    period = get_flow_data(chat_id, "time_period")
+    # ✅ Recuperar datos de forma segura
+    session = get_full_session(chat_id)
+    data = session.get("data", {})
     
-    logger.info(f"[PROCEED_LOCATION] chat_id={chat_id}, service={service_id}, time={time_str} {period}")
+    service_id = data.get("service_id")
+    time_str = data.get("selected_time")
+    period = data.get("time_period")
+    
+    logger.info(f"[PROCEED_LOCATION] chat_id={chat_id}, session_state={session.get('state')}")
+    logger.info(f"[PROCEED_LOCATION] datos: service={service_id}, time={time_str}, period={period}")
+    logger.info(f"[PROCEED_LOCATION] data_keys: {list(data.keys())}")
     
     if not service_id:
-        logger.error(f"[PROCEED_LOCATION] ERROR: service_id es None para {chat_id}")
-        send_safe(chat_id, f"{Icons.ERROR} Error: no se encontró el servicio seleccionado. Usá /start de nuevo.")
+        logger.error(f"[PROCEED_LOCATION] ERROR: service_id no encontrado. Data: {data}")
+        send_safe(chat_id, f"{Icons.ERROR} Error: sesión expirada. Usá /start de nuevo.")
         return
     
-    # ✅ Cambiar estado DESPUÉS de verificar datos
-    set_state(chat_id, UserState.CLIENT_SHARING_LOCATION)
+    # ✅ Cambiar estado preservando datos
+    save_state_and_data(chat_id, UserState.CLIENT_SHARING_LOCATION, data)
     
     text = f"""
 {Icons.LOCATION} <b>Último paso: Ubicación</b>
@@ -192,75 +216,60 @@ def proceed_to_location(chat_id: str, message_id: int):
     delete_safe(chat_id, message_id)
     send_safe(chat_id, text, get_location_keyboard())
 
-# ✅ CORREGIDO: Verifica que el estado sea CLIENT_SHARING_LOCATION específicamente
+# ✅ CORREGIDO: Filtro de ubicación
 def _is_client_sharing_location(message):
-    """
-    Verifica si el usuario está en estado de compartir ubicación.
-    CRÍTICO: Debe detectar específicamente CLIENT_SHARING_LOCATION.
-    """
+    """Verifica si el usuario está esperando compartir ubicación"""
     try:
         chat_id = str(message.chat.id)
-        session = get_session(chat_id)
-        
-        if not session:
-            logger.debug(f"[LOCATION CHECK] No session para {chat_id}")
-            return False
+        session = get_full_session(chat_id)
         
         current_state = session.get("state", "idle")
-        target_state = UserState.CLIENT_SHARING_LOCATION.value
+        target = UserState.CLIENT_SHARING_LOCATION.value
         
-        is_match = current_state == target_state
+        is_match = current_state == target
         
-        logger.info(f"[LOCATION CHECK] chat_id={chat_id}, current={current_state}, target={target_state}, match={is_match}")
+        logger.info(f"[CHECK] chat_id={chat_id}, state={current_state}, target={target}, match={is_match}")
         
         return is_match
             
     except Exception as e:
-        logger.error(f"[LOCATION CHECK] Error: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"[CHECK] Error: {e}")
         return False
 
 @bot.message_handler(content_types=['location'], func=_is_client_sharing_location)
 def handle_client_location(message):
-    """
-    Handler para ubicación del cliente.
-    Procesa la ubicación y muestra pantalla de confirmación.
-    """
+    """Procesa ubicación del cliente"""
     chat_id = str(message.chat.id)
     
     try:
         lat = message.location.latitude
         lon = message.location.longitude
         
-        logger.info(f"[CLIENT LOCATION] Recibida de chat_id={chat_id}: lat={lat}, lon={lon}")
+        logger.info(f"[LOCATION] chat_id={chat_id}, lat={lat}, lon={lon}")
         
-        # ✅ CORREGIDO: Recuperar TODOS los datos usando get_flow_data
-        service_id = get_flow_data(chat_id, "service_id")
-        time_str = get_flow_data(chat_id, "selected_time") 
-        period = get_flow_data(chat_id, "time_period")
+        # ✅ Recuperar datos completos
+        session = get_full_session(chat_id)
+        data = session.get("data", {})
         
-        logger.info(f"[CLIENT LOCATION] Datos recuperados: service={service_id}, time={time_str}, period={period}")
+        service_id = data.get("service_id")
+        time_str = data.get("selected_time")
+        period = data.get("time_period")
         
-        # ✅ Validar datos antes de continuar
-        if not service_id:
-            logger.error(f"[CLIENT LOCATION] ERROR: service_id es None")
-            send_safe(chat_id, f"{Icons.ERROR} Error: no se encontró el servicio. Usá /start.")
-            return
-            
-        if not time_str:
-            logger.error(f"[CLIENT LOCATION] ERROR: time_str es None")
-            send_safe(chat_id, f"{Icons.ERROR} Error: no se encontró la hora. Usá /start.")
+        logger.info(f"[LOCATION] datos: {data}")
+        
+        if not service_id or not time_str:
+            logger.error(f"[LOCATION] Datos incompletos: service={service_id}, time={time_str}")
+            send_safe(chat_id, f"{Icons.ERROR} Error: datos incompletos. Usá /start.")
             return
         
-        # ✅ Guardar ubicación
-        update_flow_data(chat_id, lat=lat, lon=lon, location_shared=True)
+        # Agregar ubicación a datos
+        data.update({"lat": lat, "lon": lon, "location_shared": True})
         
         # Eliminar teclado
         remove_keyboard(chat_id, "📍 Ubicación recibida")
         
-        # ✅ CAMBIAR ESTADO ANTES de enviar confirmación
-        set_state(chat_id, UserState.CLIENT_CONFIRMING)
+        # Cambiar estado y guardar todo
+        save_state_and_data(chat_id, UserState.CLIENT_CONFIRMING, data)
         
         # Mostrar confirmación
         confirmation_text = f"""
@@ -274,10 +283,10 @@ def handle_client_location(message):
         """
         
         send_safe(chat_id, confirmation_text, get_confirmation_keyboard())
-        logger.info(f"[CLIENT LOCATION] Confirmación enviada a {chat_id}")
+        logger.info(f"[LOCATION] Confirmación enviada a {chat_id}")
         
     except Exception as e:
-        logger.error(f"[CLIENT LOCATION] Error procesando ubicación: {e}")
+        logger.error(f"[LOCATION] Error: {e}")
         import traceback
         traceback.print_exc()
-        send_safe(chat_id, f"{Icons.ERROR} Error al procesar ubicación. Intentá de nuevo o usá /cancel.")
+        send_safe(chat_id, f"{Icons.ERROR} Error. Usá /cancel.")
