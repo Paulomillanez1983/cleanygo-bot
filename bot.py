@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-CleanyGo Bot - Optimized for Railway with Gevent
+CleanyGo Bot - Entrada principal optimizada para Railway
 """
 
 import os
@@ -8,33 +8,39 @@ import gevent
 from flask import Flask, request, jsonify
 from telebot.types import Update
 
-from config import logger
-from utils.icons import Icons
-
-# Initialize Flask first
 app = Flask(__name__)
 
-# Lazy database initialization
-_db_initialized = False
+# ----- INICIALIZACIÓN LAZY -----
+_bot_initialized = False
+bot = None
 
-def get_db():
-    global _db_initialized
-    if not _db_initialized:
-        from database import init_db
-        init_db()
-        _db_initialized = True
-
-# Import bot after Flask setup to avoid circular imports
-from config import bot
-
-# Import handlers for decorators
-import handlers.common
-import handlers.client.flow
-import handlers.client.search
-import handlers.client.callbacks
-import handlers.worker.flow
-import handlers.worker.jobs
-import handlers.worker.profile
+def init_bot():
+    """Inicializa bot y base de datos solo cuando se necesita"""
+    global _bot_initialized, bot
+    
+    if _bot_initialized:
+        return bot
+        
+    # 1. Inicializar DB primero
+    from database import init_db
+    init_db()
+    
+    # 2. Inicializar Bot (ahora sí tenemos TOKEN en runtime)
+    from config import get_bot
+    global bot
+    bot = get_bot()
+    
+    # 3. Importar handlers AHORA que bot existe
+    import handlers.common
+    import handlers.client.flow
+    import handlers.client.search
+    import handlers.client.callbacks
+    import handlers.worker.flow
+    import handlers.worker.jobs
+    import handlers.worker.profile
+    
+    _bot_initialized = True
+    return bot
 
 # ----- Healthcheck -----
 @app.route('/')
@@ -42,48 +48,50 @@ import handlers.worker.profile
 def health():
     return jsonify({
         "status": "healthy", 
-        "bot": "CleanyGo online",
-        "service": "running"
+        "service": "running",
+        "bot_initialized": _bot_initialized
     }), 200
 
 # ----- Webhook endpoint -----
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    get_db()  # Initialize DB on first request if needed
-    
+    if not _bot_initialized:
+        init_bot()
+        
     if request.headers.get('content-type') != 'application/json':
         return 'Forbidden', 403
     
     json_string = request.get_data().decode('utf-8')
     update = Update.de_json(json_string)
     
-    # Use gevent spawn instead of threading for compatibility with gunicorn+gevent
+    # Usar gevent en lugar de threading para compatibilidad
     gevent.spawn(bot.process_new_updates, [update])
     
     return '', 200
 
-# ----- Webhook setup on startup -----
+# ----- Webhook setup -----
 def setup_webhook():
-    """Configure webhook on Railway startup"""
+    """Configura webhook en Railway"""
     try:
         domain = os.environ.get('RAILWAY_PUBLIC_DOMAIN')
-        if domain:
+        if domain and _bot_initialized:
             webhook_url = f"https://{domain}/webhook"
             bot.remove_webhook()
             bot.set_webhook(url=webhook_url)
-            logger.info(f"{Icons.SUCCESS} Webhook set to: {webhook_url}")
-        else:
-            logger.warning(f"{Icons.WARNING} RAILWAY_PUBLIC_DOMAIN not set, using polling mode")
+            logger.info(f"Webhook configurado: {webhook_url}")
     except Exception as e:
-        logger.error(f"{Icons.ERROR} Failed to set webhook: {e}")
+        logger.error(f"Error configurando webhook: {e}")
 
-# Run setup when module loads (only in workers, not during health checks)
-if os.environ.get('RAILWAY_ENVIRONMENT'):
-    setup_webhook()
+# Inicializar en primer request o al arrancar (si tenemos variables)
+@app.before_request
+def ensure_initialized():
+    if not _bot_initialized:
+        init_bot()
+        if os.environ.get('RAILWAY_PUBLIC_DOMAIN'):
+            setup_webhook()
 
-# ----- LOCAL DEVELOPMENT ONLY -----
+# ----- LOCAL -----
 if __name__ == "__main__":
+    init_bot()  # Inicializar inmediatamente en local
     port = int(os.environ.get("PORT", 8080))
-    logger.info(f"{Icons.SUCCESS} Starting CleanyGo locally on port {port}")
-    # Use Flask dev server locally, Gunicorn in production
-    app.run(host="0.0.0.0", port=port, threaded=True)
+    app.run(host="0.0.0.0", port=port)
