@@ -133,6 +133,12 @@ def handle_client_accept(call):
             "service_id": request["service_id"],
             "hora": request["hora"]
         })
+
+        # ===================== BOTÓN PARA INICIAR SERVICIO =====================
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        markup.add(types.InlineKeyboardButton(f"{Icons.PLAY} Iniciar servicio", callback_data=f"start_job:{request_id}"))
+        send_safe(worker_id, f"{Icons.INFO} Podés iniciar el servicio ahora.", markup)
+
         worker_data = db_execute("SELECT * FROM workers WHERE chat_id=?", (str(worker_id),), fetch_one=True)
         if worker_data:
             try:
