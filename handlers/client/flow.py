@@ -1,6 +1,7 @@
 # handlers/client/flow.py
 """
-Flujo completo para clientes - Solicitud de servicios (UX optimizada).
+Flujo completo para clientes - Solicitud de servicios (UX optimizada)
+con asignación automática a trabajadores y menú funcional.
 """
 
 from config import bot
@@ -17,6 +18,7 @@ import logging
 
 # Importar precios y funciones de jobs
 from handlers.worker import jobs as worker_jobs
+from handlers.worker.main import show_worker_menu
 from services import request_service
 
 logger = logging.getLogger(__name__)
@@ -53,7 +55,6 @@ def get_flow_data(chat_id: str, key: str, default=None):
         return default
 
 def get_service_display(service_id: str, with_price: bool = False) -> str:
-    """Devuelve nombre y precio opcional del servicio"""
     svc = SERVICES.get(service_id, {})
     text = f"{svc.get('icon', '🔹')} <b>{svc.get('name', service_id)}</b>"
     if with_price:
@@ -225,7 +226,31 @@ def handle_client_confirmation(call):
     set_state(chat_id, UserState.CLIENT_WAITING_ACCEPTANCE, {"request_id": request_id})
     bot.answer_callback_query(call.id, "¡Solicitud enviada! Buscando profesionales cercanos...")
 
-    # Mensaje de búsqueda optimizado
+    # ==================== ASIGNAR TRABAJADOR DISPONIBLE ====================
+    available_workers, status, extra = worker_jobs.find_available_workers(
+        service_id, lat, lon, hora_completa
+    )
+
+    if available_workers:
+        assigned_worker = available_workers[0]
+        worker_id = assigned_worker[0]
+        # Intentar asignar de manera segura
+        success = worker_jobs.assign_worker_to_request_safe(request_id, worker_id)
+        if success:
+            # Mostrar menú al worker
+            worker_data = {
+                "request_id": request_id,
+                "service_id": service_id,
+                "hora": hora_completa,
+                "client_id": chat_id
+            }
+            show_worker_menu(worker_id, worker_data)
+        else:
+            logger.warning(f"[ASSIGN FAIL] request_id={request_id} worker={worker_id} ya fue tomada")
+    else:
+        logger.info(f"[NO WORKERS] status={status}, extra={extra}")
+
+    # Mensaje de búsqueda optimizado para el cliente
     search_text = f"""
 {Icons.SEARCH} <b>Buscando profesionales disponibles...</b>
 
