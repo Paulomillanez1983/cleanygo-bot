@@ -15,8 +15,9 @@ from handlers.common import send_safe, edit_safe, delete_safe, remove_keyboard
 from telebot import types
 import logging
 
-# Importar precios desde jobs
+# Importar precios y funciones de jobs
 from handlers.worker import jobs as worker_jobs
+from services import request_service  # <-- request_service seguro con create_request y assign_worker_to_request_safe
 
 logger = logging.getLogger(__name__)
 
@@ -196,3 +197,50 @@ Servicio: {service_info['name']}
 """
     send_safe(chat_id, confirmation_text, get_confirmation_keyboard())
     logger.info(f"[LOCATION] Confirmación enviada")
+
+# ==================== CONFIRMACIÓN FINAL ====================
+
+@bot.callback_query_handler(func=lambda c: c.data == "confirm_yes_client")
+def handle_client_confirmation(call):
+    chat_id = str(call.message.chat.id)
+    
+    service_id = get_data(chat_id, "service_id")
+    time_str = get_data(chat_id, "selected_time")
+    period = get_data(chat_id, "time_period")
+    lat = get_data(chat_id, "lat")
+    lon = get_data(chat_id, "lon")
+    
+    hora_completa = f"{time_str} {period}"
+    
+    # Verificar si ya existe request_id
+    session = get_session(chat_id)
+    request_id = session.get("data", {}).get("request_id")
+    
+    if not request_id:
+        request_id = request_service.create_request(
+            client_chat_id=chat_id,
+            service_id=service_id,
+            hora=hora_completa,
+            lat=lat,
+            lon=lon,
+            status='waiting_acceptance'
+        )
+        if not request_id:
+            bot.answer_callback_query(call.id, "❌ Error al crear la solicitud, intentá de nuevo")
+            return
+        update_data(chat_id, request_id=request_id)
+    
+    # Cambiar estado a esperando aceptación
+    set_state(chat_id, UserState.CLIENT_WAITING_ACCEPTANCE, {"request_id": request_id})
+    
+    bot.answer_callback_query(call.id, "¡Solicitud enviada! Buscando profesionales cercanos...")
+    
+    # Mensaje de búsqueda
+    search_text = f"""
+{Icons.SEARCH} <b>Buscando profesionales disponibles...</b>
+
+{Icons.PENDING} Verificando disponibilidad para {worker_jobs.SERVICES_PRICES.get(service_id, {}).get('name', service_id)} a las {hora_completa}
+
+{Icons.TIME} Esto puede tardar unos segundos...
+"""
+    edit_safe(chat_id, call.message.message_id, search_text)
