@@ -351,3 +351,17 @@ class Notifier:
 notify_worker = Notifier.notify_worker
 notify_client = Notifier.notify_client
 broadcast_to_workers = Notifier.broadcast_to_workers
+# ==================== COMPATIBILIDAD HACIA ATRÁS ====================
+# Permite que handlers importen 'bot' directamente después de inject_bot()
+
+def __getattr__(name):
+    """Intercepta import config.bot y devuelve la instancia inyectada"""
+    global _bot_instance
+    if name == 'bot':
+        if _bot_instance is None:
+            raise RuntimeError(
+                "Bot no inicializado. "
+                "Asegúrate de llamar config.inject_bot(bot) antes de importar handlers"
+            )
+        return _bot_instance
+    raise AttributeError(f"module 'config' has no attribute '{name}'")
