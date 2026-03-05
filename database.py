@@ -6,9 +6,10 @@ from utils.icons import Icons
 
 # ==================== INICIALIZACIÓN DB ====================
 def init_db():
+    """Crea todas las tablas necesarias si no existen."""
     with sqlite3.connect(DB_FILE) as conn:
         cursor = conn.cursor()
-        
+
         # Tabla de trabajadores
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS workers (
@@ -25,7 +26,7 @@ def init_db():
                 created_at INTEGER DEFAULT (strftime('%s', 'now'))
             )
         ''')
-        
+
         # Tabla de servicios con precios
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS worker_services (
@@ -36,7 +37,7 @@ def init_db():
                 FOREIGN KEY (chat_id) REFERENCES workers(chat_id) ON DELETE CASCADE
             )
         ''')
-        
+
         # Tabla de solicitudes
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS requests (
@@ -55,7 +56,7 @@ def init_db():
                 completed_at INTEGER
             )
         ''')
-        
+
         # Tabla de ratings
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS ratings (
@@ -68,7 +69,7 @@ def init_db():
                 created_at INTEGER DEFAULT (strftime('%s', 'now'))
             )
         ''')
-        
+
         # Tabla de sesiones para estados de usuario
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS sessions (
@@ -78,16 +79,19 @@ def init_db():
                 last_activity INTEGER
             )
         ''')
-        
+
         conn.commit()
-    logger.info(f"{Icons.SUCCESS} Base de datos inicializada")
-with sqlite3.connect(DB_FILE) as conn:
-    cursor = conn.cursor()
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-    tables = cursor.fetchall()
-    logger.info(f"Tablas creadas: {tables}")
+    
+    # Mostrar tablas creadas
+    with sqlite3.connect(DB_FILE) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+        tables = cursor.fetchall()
+        logger.info(f"{Icons.SUCCESS} Tablas creadas: {tables}")
+
 # ==================== EJECUTAR CONSULTAS ====================
 def db_execute(query, params=(), fetch_one=False, commit=False):
+    """Ejecuta consultas SQL de manera segura."""
     try:
         with sqlite3.connect(DB_FILE) as conn:
             cursor = conn.cursor()
