@@ -11,7 +11,7 @@ from services.request_service import (
     get_request,
     assign_worker_to_request_safe,
     update_request_status,
-    find_available_workers   # ✅ importante, antes estaba en utils.worker_utils
+    find_available_workers
 )
 
 from handlers.common import send_safe, edit_safe
@@ -75,7 +75,6 @@ def notify_worker(worker, request_id, service_id, hora, lat, lon):
     worker_id, nombre, w_lat, w_lon, rating, precio = worker[:6]
     dist = worker[6] if len(worker) > 6 else 0
 
-    # Asegurar que precio nunca sea None
     price = precio if precio is not None else SERVICES_PRICES.get(service_id, {}).get("price", 0)
     service_info = SERVICES_PRICES.get(service_id, {"name": service_id.capitalize(), "price": price})
 
@@ -129,7 +128,6 @@ def handle_confirm_request(call):
     """
     edit_safe(chat_id, call.message.message_id, search_text)
 
-    # Buscar trabajadores disponibles
     result = find_available_workers(service_id, lat, lon, hora_completa)
     if len(result) == 3:
         workers, status, extra = result
@@ -150,7 +148,6 @@ def handle_confirm_request(call):
         edit_safe(chat_id, call.message.message_id, no_workers_text, markup)
         return
 
-    # Notificar trabajadores
     notified = 0
     for worker in workers:
         try:
@@ -185,11 +182,15 @@ def handle_retry_search(call):
         bot.answer_callback_query(call.id, "Solicitud no encontrada")
         return
 
-    _, client_id, service_id, _, hora, lat, lon, status, *_ = request
+    client_id = request.get("client_id")
+    service_id = request.get("service_id")
+    hora = request.get("request_time")
+    lat = request.get("lat")
+    lon = request.get("lon")
+
     update_request_status(request_id, 'searching')
     bot.answer_callback_query(call.id, "Reintentando búsqueda...")
 
-    # Actualizar sesión
     hora_parts = hora.split()
     update_data(chat_id,
         service_id=service_id,
@@ -241,7 +242,6 @@ def handle_job_accept(call):
     try:
         request_id = int(call.data.split(":")[1])
         request = get_request(request_id)
-
         if not request:
             bot.answer_callback_query(call.id, "❌ Este trabajo no existe", show_alert=True)
             edit_safe(chat_id, call.message.message_id,
@@ -273,16 +273,15 @@ def handle_job_accept(call):
 
 {Icons.INFO} Contactá al cliente para coordinar los detalles.
 
-{Icons.PHONE} <b>Cliente:</b> {request['client_chat_id']}
+{Icons.PHONE} <b>Cliente:</b> {request.get('client_id')}
         """
         edit_safe(chat_id, call.message.message_id, worker_text)
 
         # Notificar al cliente
-        client_id = request["client_chat_id"]
-        service_id = request["service_id"]
-        hora = request["hora"]
+        client_id = request.get("client_id")
+        service_id = request.get("service_id")
+        hora = request.get("request_time")
 
-        # Asegurar precio
         service_price = SERVICES_PRICES.get(service_id, {}).get("price", 0)
         service_info = SERVICES_PRICES.get(service_id, {"name": service_id.capitalize(), "price": service_price})
         price_text = format_price(service_info["price"])
@@ -318,7 +317,6 @@ def handle_job_reject(call):
     try:
         request_id = int(call.data.split(":")[1])
         request = get_request(request_id)
-
         if not request:
             bot.answer_callback_query(call.id, "❌ Este trabajo no existe", show_alert=True)
             edit_safe(chat_id, call.message.message_id,
