@@ -109,10 +109,16 @@ def get_confirmation_keyboard():
     return markup
 
 def get_job_response_keyboard(request_id: int):
+    """Alias para compatibilidad - usar get_worker_request_keyboard"""
+    return get_worker_request_keyboard(request_id)
+
+def get_worker_request_keyboard(request_id: int):
+    """Teclado para que worker acepte/rechace una solicitud"""
     markup = types.InlineKeyboardMarkup(row_width=2)
     markup.add(
-        types.InlineKeyboardButton(f"{Icons.SUCCESS} Aceptar", callback_data=f"job_accept:{request_id}"),
-        types.InlineKeyboardButton(f"{Icons.ERROR} Rechazar", callback_data=f"job_reject:{request_id}")
+        types.InlineKeyboardButton(f"{Icons.SUCCESS} Aceptar", callback_data=f"accept_request:{request_id}"),
+        types.InlineKeyboardButton(f"{Icons.ERROR} Rechazar", callback_data=f"reject_request:{request_id}"),
+        types.InlineKeyboardButton(f"{Icons.INFO} Ver detalles", callback_data=f"view_request:{request_id}")
     )
     return markup
 
@@ -138,4 +144,3 @@ def get_alternative_times_keyboard(service_id: str, request_id: int):
     ))
     
     return markup
-
