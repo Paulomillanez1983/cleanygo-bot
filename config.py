@@ -1,16 +1,20 @@
 import os
 import logging
 
-# Logging
+# ==================== LOGGING ====================
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-# Variables
+# ==================== VARIABLES ====================
+# Token del bot (Railway o local)
 TOKEN = os.getenv("BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
+
+# Archivo de la base de datos SQLite
 DB_FILE = "cleanygo_ux.db"
 
-# Bot se creará en bot.py, no aquí
+# ==================== BOT ====================
+# Se inicializa luego en bot.py y se inyecta acá
 bot = None
