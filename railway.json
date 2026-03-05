@@ -16,7 +16,7 @@
     }
   },
   "deploy": {
-    "startCommand": "gunicorn -w 4 -k gevent --bind 0.0.0.0:$PORT wsgi:app --log-level info --access-logfile - --error-logfile -",
+    "startCommand": "gunicorn -w 4 -k gevent --bind 0.0.0.0:$PORT bot:app --log-level info --access-logfile - --error-logfile -",
     "restartPolicyType": "ALWAYS",
     "restartPolicyMaxRetries": 10,
     "sleepApplication": false,
