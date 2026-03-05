@@ -12,7 +12,9 @@ from handlers.worker.jobs import SERVICES_PRICES
 
 # ==================== UTILIDADES ====================
 def format_price(price: float) -> str:
-    return f"${price:,.0f}".replace(",", ".")
+    if price is None:
+        price = 0
+    return f"${int(price):,}".replace(",", ".")
 
 def generate_no_availability_message(status: str, service_id: str, hora: str, extra=None) -> str:
     svc_name = SERVICES[service_id]['name']
@@ -65,15 +67,19 @@ def notify_worker(worker, request_id, service_id, hora, lat, lon):
     worker_id, nombre, w_lat, w_lon, rating, precio = worker[:6]
     dist = worker[6] if len(worker) > 6 else 0
 
+    # Asegurar que precio nunca sea None
+    price = precio if precio is not None else SERVICES_PRICES.get(service_id, {}).get("price", 0)
+    service_info = SERVICES_PRICES.get(service_id, {"name": service_id.capitalize(), "price": price})
+
+    price_text = format_price(service_info["price"])
     maps_url = f"https://www.google.com/maps?q={lat},{lon}"
-    service_info = SERVICES_PRICES.get(service_id, {"name": service_id.capitalize(), "price": precio})
 
     text = f"""
 {Icons.BELL} <b>¡Nuevo trabajo disponible!</b>
 
 Servicio: {service_info['name']}
 {Icons.TIME} <b>Hora:</b> {hora}
-{Icons.MONEY} <b>Tu precio:</b> ${service_info['price']}/hora
+{Icons.MONEY} <b>Tu precio:</b> {price_text}/hora
 {Icons.LOCATION} <b>Distancia:</b> {dist:.1f} km
 
 {Icons.INFO} ¿Aceptás este trabajo?
@@ -92,7 +98,7 @@ Servicio: {service_info['name']}
 @bot.callback_query_handler(func=lambda c: c.data == "confirm_yes")
 def handle_confirm_request(call):
     chat_id = call.message.chat.id
-    
+
     service_id = get_data(chat_id, "service_id")
     time_str = get_data(chat_id, "selected_time")
     period = get_data(chat_id, "time_period")
@@ -267,13 +273,17 @@ def handle_job_accept(call):
         client_id = request["client_chat_id"]
         service_id = request["service_id"]
         hora = request["hora"]
-        service_info = SERVICES_PRICES.get(service_id, {"name": service_id.capitalize(), "price": 0})
+
+        # Asegurar precio
+        service_price = SERVICES_PRICES.get(service_id, {}).get("price", 0)
+        service_info = SERVICES_PRICES.get(service_id, {"name": service_id.capitalize(), "price": service_price})
+        price_text = format_price(service_info["price"])
 
         client_text = f"""
 {Icons.PARTY} <b>¡Encontramos tu profesional!</b>
 
 Servicio: {service_info['name']}
-{Icons.MONEY} <b>Precio:</b> ${service_info['price']}
+{Icons.MONEY} <b>Precio:</b> {price_text}
 {Icons.TIME} <b>Hora:</b> {hora}
 
 {Icons.INFO} El profesional se pondrá en contacto con vos pronto.
