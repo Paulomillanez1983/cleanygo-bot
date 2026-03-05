@@ -4,10 +4,23 @@ Handlers para gestión de trabajos/asignaciones para profesionales.
 
 from telebot import types
 from config import bot, logger
+from models.user_state import set_state, UserState
+from models.services_data import SERVICES
 from utils.icons import Icons
+from utils.keyboards import get_job_response_keyboard
+from services.request_service import assign_worker_to_request
 from handlers.common import send_safe, edit_safe
-from database import db_execute
 import time
+from database import db_execute
+
+# ===================== PRECIOS DE SERVICIOS =====================
+# Ajustar según los servicios que tengas
+SERVICES_PRICES = {
+    "ninaera": {"name": "Niñera", "price": 1500},
+    "limpieza": {"name": "Limpieza", "price": 2000},
+    "plomeria": {"name": "Plomería", "price": 2500},
+    # Agregar más servicios aquí
+}
 
 # ===================== UTILS =====================
 
@@ -28,7 +41,7 @@ def get_request(request_id: int):
 
 def create_request(client_chat_id: str, service_id: str, hora: str, 
                    lat: float, lon: float, status: str = 'waiting_acceptance'):
-    """Crea una nueva solicitud y devuelve su ID"""
+    """Crea una nueva solicitud"""
     result = db_execute(
         """INSERT INTO requests (client_chat_id, service_id, hora, lat, lon, status) 
            VALUES (?, ?, ?, ?, ?, ?)""",
@@ -37,9 +50,7 @@ def create_request(client_chat_id: str, service_id: str, hora: str,
     )
     
     if result is not None:
-        request_id = db_execute("SELECT last_insert_rowid()", fetch_one=True)[0]
-        logger.info(f"[DB] Nueva solicitud creada: request_id={request_id}")
-        return request_id
+        return db_execute("SELECT last_insert_rowid()", fetch_one=True)[0]
     return None
 
 
@@ -109,12 +120,16 @@ def handle_job_accept(call):
     service_id = request["service_id"]
     hora = request["hora"]
     
+    # Obtener nombre bonito y precio
+    service_info = SERVICES_PRICES.get(service_id, {"name": service_id.capitalize(), "price": 0})
+    
     from handlers.client.flow import get_service_display
     
     client_text = f"""
 {Icons.PARTY} <b>¡Encontramos tu profesional!</b>
 
-{get_service_display(service_id)}
+Servicio: {service_info['name']}
+{Icons.MONEY} <b>Precio:</b> ${service_info['price']}
 {Icons.TIME} <b>Hora:</b> {hora}
 
 {Icons.INFO} El profesional se pondrá en contacto con vos pronto.
