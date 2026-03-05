@@ -93,7 +93,7 @@ def setup_webhook():
     print(f"[INIT] ✅ Webhook configurado: {webhook_url}", file=sys.stderr)
 
 setup_webhook()
-
+print("[INIT] ✅ Bot y Flask listos para recibir webhooks", file=sys.stderr)
 # ==================== 9. RUN LOCAL ====================
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
