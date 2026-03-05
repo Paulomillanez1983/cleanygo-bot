@@ -5,6 +5,6 @@ logger = logging.getLogger(__name__)
 
 logger.info("wsgi.py cargado")
 
-from bot import app
+from main import app
 
-logger.info("Flask app importada correctamente desde bot.py")
+logger.info("Flask app importada correctamente desde main.py")
