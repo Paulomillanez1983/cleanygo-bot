@@ -4,14 +4,10 @@ Handlers para gestión de trabajos/asignaciones para profesionales.
 
 from telebot import types
 from config import bot, logger
-from models.user_state import set_state, UserState
-from models.services_data import SERVICES
 from utils.icons import Icons
-from utils.keyboards import get_job_response_keyboard
-from services.request_service import assign_worker_to_request
 from handlers.common import send_safe, edit_safe
-import time
 from database import db_execute
+import time
 
 # ===================== UTILS =====================
 
@@ -32,7 +28,7 @@ def get_request(request_id: int):
 
 def create_request(client_chat_id: str, service_id: str, hora: str, 
                    lat: float, lon: float, status: str = 'waiting_acceptance'):
-    """Crea una nueva solicitud"""
+    """Crea una nueva solicitud y devuelve su ID"""
     result = db_execute(
         """INSERT INTO requests (client_chat_id, service_id, hora, lat, lon, status) 
            VALUES (?, ?, ?, ?, ?, ?)""",
@@ -41,7 +37,9 @@ def create_request(client_chat_id: str, service_id: str, hora: str,
     )
     
     if result is not None:
-        return db_execute("SELECT last_insert_rowid()", fetch_one=True)[0]
+        request_id = db_execute("SELECT last_insert_rowid()", fetch_one=True)[0]
+        logger.info(f"[DB] Nueva solicitud creada: request_id={request_id}")
+        return request_id
     return None
 
 
