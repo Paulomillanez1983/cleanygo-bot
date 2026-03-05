@@ -1,7 +1,7 @@
 # handlers/client/flow.py
 """
 Flujo completo para clientes - Solicitud de servicios (UX optimizada)
-con asignación automática a trabajadores y menú funcional.
+con asignación automática a trabajadores, confirmación bidireccional y menú funcional.
 """
 
 from config import bot
@@ -22,7 +22,6 @@ from handlers.worker.main import show_worker_menu
 from services import request_service
 
 logger = logging.getLogger(__name__)
-
 flow = True
 
 # ==================== FUNCIONES AUXILIARES ====================
@@ -118,7 +117,7 @@ def handle_custom_time_start(call):
 def handle_hour_selection(call):
     chat_id = call.message.chat.id
     hour = call.data.split(":")[1]
-    edit_safe(chat_id, call.message.message_id, f"{Icons.CLOCK} <b>Seleccioná los minutos:</b>\nHora: {hour}:__", get_custom_time_selector("minute", hour))
+    edit_safe(call.message.chat.id, call.message.message_id, f"{Icons.CLOCK} <b>Seleccioná los minutos:</b>\nHora: {hour}:__", get_custom_time_selector("minute", hour))
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("time_m:"))
 def handle_minute_selection(call):
@@ -180,8 +179,8 @@ def handle_client_location(message):
     remove_keyboard(chat_id, "📍 Ubicación recibida")
     set_state(chat_id, UserState.CLIENT_CONFIRMING)
 
+    # Tomar precio real si el worker ya está asignado
     service_info = worker_jobs.SERVICES_PRICES.get(service_id, {"name": service_id, "price": 0})
-
     confirmation_text = f"""
 {Icons.CALENDAR} <b>Confirma tu solicitud</b>
 
@@ -234,10 +233,35 @@ def handle_client_confirmation(call):
     if available_workers:
         assigned_worker = available_workers[0]
         worker_id = assigned_worker[0]
+
         # Intentar asignar de manera segura
         success = worker_jobs.assign_worker_to_request_safe(request_id, worker_id)
         if success:
-            # Mostrar menú al worker
+            # Obtener precio real del trabajador
+            worker_price_info = worker_jobs.db_execute(
+                "SELECT precio FROM worker_services WHERE chat_id = ? AND service_id = ?",
+                (worker_id, service_id),
+                fetch_one=True
+            )
+            price = worker_price_info[0] if worker_price_info else service_info['price']
+
+            # Notificar al cliente para aceptar/rechazar
+            markup = types.InlineKeyboardMarkup(row_width=2)
+            markup.add(
+                types.InlineKeyboardButton(f"{Icons.SUCCESS} Acepto", callback_data=f"client_accept:{request_id}"),
+                types.InlineKeyboardButton(f"{Icons.ERROR} No acepto", callback_data=f"client_reject:{request_id}")
+            )
+            send_safe(chat_id, f"""
+{Icons.PARTY} <b>¡Encontramos tu profesional!</b>
+
+Servicio: {service_info['name']}
+{Icons.MONEY} <b>Precio:</b> ${price}
+{Icons.TIME} <b>Hora:</b> {hora_completa}
+
+{Icons.INFO} Confirmá si aceptás el servicio.
+""", markup)
+
+            # Mostrar menú al trabajador
             worker_data = {
                 "request_id": request_id,
                 "service_id": service_id,
@@ -254,7 +278,7 @@ def handle_client_confirmation(call):
     search_text = f"""
 {Icons.SEARCH} <b>Buscando profesionales disponibles...</b>
 
-Servicio: {worker_jobs.SERVICES_PRICES.get(service_id, {}).get('name', service_id)}
+Servicio: {service_info['name']}
 Hora: {hora_completa}
 Ubicación recibida ✅
 
