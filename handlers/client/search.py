@@ -5,7 +5,7 @@ from models.services_data import SERVICES
 from utils.icons import Icons
 from utils.keyboards import get_alternative_times_keyboard, get_role_keyboard
 from services.worker_service import find_available_workers
-from services.request_service import create_request, update_request_status, get_request, assign_worker_to_request_safe, db_execute
+from services.request_service import create_request, update_request_status, get_request, assign_worker_to_request_safe
 from handlers.common import send_safe, edit_safe
 from handlers.client.flow import get_service_display
 from handlers.worker.jobs import SERVICES_PRICES
@@ -202,18 +202,6 @@ Seleccioná otro horario:
     """
     edit_safe(chat_id, call.message.message_id, text,
               get_alternative_times_keyboard(service_id, request_id))
-
-# ==================== CAMBIAR HORA ====================
-@bot.callback_query_handler(func=lambda c: c.data.startswith("change_time:"))
-def handle_change_time(call):
-    chat_id = call.message.chat.id
-    parts = call.data.split(":")
-    request_id = int(parts[1])
-    nueva_hora = parts[2]
-
-    db_execute("UPDATE requests SET hora = ? WHERE id = ?", (f"{nueva_hora} PM", request_id), commit=True)
-    bot.answer_callback_query(call.id, f"Hora cambiada a {nueva_hora}")
-    handle_retry_search(call)
 
 # ==================== VOLVER AL INICIO ====================
 @bot.callback_query_handler(func=lambda c: c.data == "back_start")
