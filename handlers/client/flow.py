@@ -230,55 +230,64 @@ def handle_client_confirmation(call):
         service_id, lat, lon, hora_completa
     )
 
-    if available_workers:
-        assigned_worker = available_workers[0]
-        worker_id = assigned_worker[0]
+    if not available_workers:
+        logger.info(f"[NO WORKERS] status={status}, extra={extra}")
+        send_safe(chat_id, f"{Icons.WARNING} No hay profesionales disponibles en este momento. Intentá más tarde.")
+        return
 
-        # Intentar asignar de manera segura
-        success = worker_jobs.assign_worker_to_request_safe(request_id, worker_id)
-        if success:
-            # Obtener precio real del trabajador
-            worker_price_info = worker_jobs.db_execute(
-                "SELECT precio FROM worker_services WHERE chat_id = ? AND service_id = ?",
-                (worker_id, service_id),
-                fetch_one=True
-            )
-            price = worker_price_info[0] if worker_price_info else service_info['price']
+    assigned_worker = available_workers[0]
+    worker_id = assigned_worker[0]  # chat_id del trabajador
+    logger.info(f"[ASSIGN] Asignando request_id={request_id} al worker_id={worker_id}")
 
-            # Notificar al cliente para aceptar/rechazar
-            markup = types.InlineKeyboardMarkup(row_width=2)
-            markup.add(
-                types.InlineKeyboardButton(f"{Icons.SUCCESS} Acepto", callback_data=f"client_accept:{request_id}"),
-                types.InlineKeyboardButton(f"{Icons.ERROR} No acepto", callback_data=f"client_reject:{request_id}")
-            )
-            send_safe(chat_id, f"""
+    # Intentar asignar de manera segura
+    success = worker_jobs.assign_worker_to_request_safe(request_id, worker_id)
+    if not success:
+        logger.warning(f"[ASSIGN FAIL] request_id={request_id} worker={worker_id} ya fue tomada")
+        send_safe(chat_id, f"{Icons.ERROR} Lo sentimos, el profesional ya no está disponible. Intentá nuevamente.")
+        return
+
+    # Obtener precio real del trabajador
+    worker_price_info = worker_jobs.db_execute(
+        "SELECT precio FROM worker_services WHERE chat_id = ? AND service_id = ?",
+        (worker_id, service_id),
+        fetch_one=True
+    )
+    price = worker_price_info[0] if worker_price_info else worker_jobs.SERVICES_PRICES.get(service_id, {}).get("price", 0)
+
+    # Notificar al cliente para aceptar/rechazar
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        types.InlineKeyboardButton(f"{Icons.SUCCESS} Acepto", callback_data=f"client_accept:{request_id}"),
+        types.InlineKeyboardButton(f"{Icons.ERROR} No acepto", callback_data=f"client_reject:{request_id}")
+    )
+    send_safe(chat_id, f"""
 {Icons.PARTY} <b>¡Encontramos tu profesional!</b>
 
-Servicio: {service_info['name']}
+Servicio: {SERVICES[service_id]['name']}
 {Icons.MONEY} <b>Precio:</b> ${price}
 {Icons.TIME} <b>Hora:</b> {hora_completa}
 
 {Icons.INFO} Confirmá si aceptás el servicio.
 """, markup)
 
-            # Mostrar menú al trabajador
-            worker_data = {
-                "request_id": request_id,
-                "service_id": service_id,
-                "hora": hora_completa,
-                "client_id": chat_id
-            }
-            show_worker_menu(worker_id, worker_data)
-        else:
-            logger.warning(f"[ASSIGN FAIL] request_id={request_id} worker={worker_id} ya fue tomada")
-    else:
-        logger.info(f"[NO WORKERS] status={status}, extra={extra}")
+    # ==================== ENVIAR SOLICITUD AL TRABAJADOR ====================
+    worker_data = {
+        "request_id": request_id,
+        "service_id": service_id,
+        "hora": hora_completa,
+        "client_id": chat_id,
+        "lat": lat,
+        "lon": lon,
+        "price": price
+    }
+    logger.info(f"[SHOW WORKER MENU] Enviando solicitud a worker_id={worker_id}")
+    show_worker_menu(worker_id, worker_data)
 
     # Mensaje de búsqueda optimizado para el cliente
     search_text = f"""
 {Icons.SEARCH} <b>Buscando profesionales disponibles...</b>
 
-Servicio: {service_info['name']}
+Servicio: {SERVICES[service_id]['name']}
 Hora: {hora_completa}
 Ubicación recibida ✅
 
