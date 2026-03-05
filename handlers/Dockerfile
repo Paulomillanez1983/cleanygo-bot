@@ -9,7 +9,7 @@ COPY .nixpacks/nixpkgs-*.nix .nixpacks/
 # Instalar dependencias del sistema
 RUN nix-env -if .nixpacks/nixpkgs-*.nix && nix-collect-garbage -d
 
-# Copiar código
+# Copiar todo el código
 COPY . /app
 
 # Crear virtualenv y cachear pip
@@ -20,7 +20,7 @@ RUN python -m venv --copies /opt/venv \
 # Añadir venv al PATH
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Añadir carpeta app al PYTHONPATH para que services y handlers se reconozcan como paquetes
+# Añadir carpeta app al PYTHONPATH para que servicios y handlers se reconozcan
 ENV PYTHONPATH="/app:$PYTHONPATH"
 
 # Comando final con Gunicorn
