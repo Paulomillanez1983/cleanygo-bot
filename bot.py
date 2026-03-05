@@ -70,11 +70,8 @@ def setup_webhook():
     logger.info(f"✅ Webhook configurado: {webhook_url}")
     return webhook_url
 
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8080))
+port = int(os.environ.get("PORT", 8080))
 
-    logger.info(f"{Icons.SUCCESS} Iniciando CleanyGo en puerto {port}")
+logger.info(f"{Icons.SUCCESS} Iniciando CleanyGo")
 
-    setup_webhook()
-
-    app.run(host="0.0.0.0", port=port)
+setup_webhook()
