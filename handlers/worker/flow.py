@@ -8,7 +8,6 @@ from telebot import types, apihelper
 from config import bot
 from models.services_data import SERVICES
 from utils.icons import Icons
-from utils.keyboards import get_service_selector
 from database import db_execute
 
 # ==================== CONFIGURACIÓN ====================
@@ -73,6 +72,21 @@ def handle_worker_start(message):
         logger.error(f"[START ERROR] chat_id={chat_id} -> {e}")
         bot.send_message(chat_id, f"{Icons.ERROR} Ocurrió un error iniciando tu registro. Intentá de nuevo.")
 
+# ==================== SELECCIÓN DE SERVICIOS INLINE ====================
+def get_service_selector_inline(selected_services):
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    buttons = []
+    for svc_id, svc in SERVICES.items():
+        name = svc['name']
+        if svc_id in selected_services:
+            text = f"✅ {name}"
+        else:
+            text = name
+        buttons.append(types.InlineKeyboardButton(text=text, callback_data=f"svc_toggle:{svc_id}"))
+    buttons.append(types.InlineKeyboardButton("Confirmar ✅", callback_data="svc_confirm"))
+    markup.add(*buttons)
+    return markup
+
 def start_worker_flow(chat_id: int):
     try:
         worker = db_execute("SELECT * FROM workers WHERE chat_id = ?", (str(chat_id),), fetch_one=True)
@@ -92,13 +106,12 @@ def start_worker_flow(chat_id: int):
             f"<b>Paso 1/5:</b> Seleccioná los servicios que ofrecés\n"
             f"{Icons.INFO} Podés seleccionar varios."
         )
-        markup = get_service_selector([])
+        markup = get_service_selector_inline([])
         bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
     except Exception as e:
-        logger.error(f"[FLOW START ERROR] chat_id={chat_id} -> {traceback.format_exc()}")
+        logger.error(f"[FLOW START ERROR INLINE] chat_id={chat_id} -> {traceback.format_exc()}")
         bot.send_message(chat_id, f"{Icons.ERROR} Error iniciando flujo de registro.")
 
-# ==================== SELECCIÓN DE SERVICIOS ====================
 @bot.callback_query_handler(func=lambda c: c.data.startswith("svc_toggle:"))
 def handle_service_toggle(call):
     chat_id = call.message.chat.id
@@ -118,9 +131,10 @@ def handle_service_toggle(call):
             bot.answer_callback_query(call.id, f"✅ {SERVICES[service_id]['name']} agregado")
 
         update_data(chat_id, selected_services=selected)
-        bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=get_service_selector(selected))
+        bot.edit_message_reply_markup(chat_id, call.message.message_id,
+                                      reply_markup=get_service_selector_inline(selected))
     except Exception as e:
-        logger.error(f"[SERVICE TOGGLE ERROR] chat_id={chat_id} -> {traceback.format_exc()}")
+        logger.error(f"[SERVICE TOGGLE ERROR INLINE] chat_id={chat_id} -> {traceback.format_exc()}")
         bot.answer_callback_query(call.id, "❌ Ocurrió un error.", show_alert=True)
 
 @bot.callback_query_handler(func=lambda c: c.data == "svc_confirm")
@@ -130,6 +144,7 @@ def handle_service_confirm(call):
     if not selected:
         bot.answer_callback_query(call.id, "Seleccioná al menos un servicio", show_alert=True)
         return
+
     bot.answer_callback_query(call.id)
     try:
         bot.delete_message(chat_id, call.message.message_id)
@@ -308,16 +323,13 @@ def save_worker_data(chat_id: str, dni: str):
         clear_state(chat_id)
         return
 
-    # Guardar datos básicos del trabajador
     db_execute("""
         INSERT OR REPLACE INTO workers (chat_id, nombre, telefono, dni_file_id, disponible, lat, lon, last_update)
         VALUES (?, ?, ?, ?, 0, NULL, NULL, NULL)
     """, (str(chat_id), name, phone, dni), commit=True)
 
-    # Borrar servicios antiguos
     db_execute("DELETE FROM worker_services WHERE chat_id=?", (str(chat_id),), commit=True)
 
-    # Guardar servicios y precios seleccionados
     for service_id in selected_services:
         precio = float(prices.get(service_id) or 0)
         db_execute(
