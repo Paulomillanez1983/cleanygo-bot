@@ -13,7 +13,7 @@ from services.request_service import (
     update_request_status,
     find_available_workers   # ✅ importante, antes estaba en utils.worker_utils
 )
-from services.request_service import create_request, update_request_status, get_request, assign_worker_to_request_safe
+
 from handlers.common import send_safe, edit_safe
 from handlers.client.flow import get_service_display
 from handlers.worker.jobs import SERVICES_PRICES
