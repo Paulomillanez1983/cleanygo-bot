@@ -6,7 +6,7 @@ from utils.icons import Icons
 
 # ==================== INICIALIZACIÓN DB ====================
 def init_db():
-    """Crea todas las tablas necesarias si no existen."""
+    """Crea todas las tablas necesarias y agrega columnas faltantes."""
     with sqlite3.connect(DB_FILE) as conn:
         cursor = conn.cursor()
 
@@ -81,7 +81,21 @@ def init_db():
         ''')
 
         conn.commit()
-    
+
+        # ==================== AGREGAR COLUMNAS FALTANTES ====================
+        # Columna current_request_id en workers
+        cursor.execute("PRAGMA table_info(workers)")
+        columns = [col[1] for col in cursor.fetchall()]
+        if "current_request_id" not in columns:
+            cursor.execute("""
+                ALTER TABLE workers 
+                ADD COLUMN current_request_id INTEGER DEFAULT NULL
+            """)
+            conn.commit()
+            logger.info(f"{Icons.SUCCESS} Columna 'current_request_id' agregada a workers")
+        else:
+            logger.info(f"{Icons.INFO} Columna 'current_request_id' ya existe en workers")
+
     # Mostrar tablas creadas
     with sqlite3.connect(DB_FILE) as conn:
         cursor = conn.cursor()
