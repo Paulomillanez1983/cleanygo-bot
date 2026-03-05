@@ -15,12 +15,14 @@ COPY . /app
 
 # Crear virtualenv y cachear pip
 RUN python -m venv --copies /opt/venv \
-    && . /opt/venv/bin/activate \
-    && pip install --upgrade pip \
-    && pip install -r requirements.txt
+    && /opt/venv/bin/pip install --upgrade pip \
+    && /opt/venv/bin/pip install -r requirements.txt
 
 # Añadir venv al PATH
-RUN printf '\nPATH=/opt/venv/bin:$PATH' >> /root/.profile
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Añadir carpeta app al PYTHONPATH para reconocer servicios como paquete
+ENV PYTHONPATH="/app:$PYTHONPATH"
 
 # Comando final con Gunicorn
 CMD ["gunicorn", "-w", "4", "-k", "gevent", "--bind", "0.0.0.0:$PORT", "bot:app", "--log-level", "info", "--access-logfile", "-", "--error-logfile", "-"]
