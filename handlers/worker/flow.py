@@ -300,19 +300,165 @@ def handle_location(message):
                      parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
     try:
         from handlers.worker.profile import show_worker_menu
-        worker_data = db_execute("SELECT * FROM workers WHERE chat_id=?", (str(chat_id),), fetch_one=True)
-        if worker_data:
-            show_worker_menu(chat_id, worker_data)
+# ==================== FLUJO WORKER OPTIMIZADO ====================
+
+def start_worker_flow(chat_id: int):
+    try:
+        worker = db_execute(
+            "SELECT * FROM workers WHERE chat_id = ?",
+            (str(chat_id),),
+            fetch_one=True
+        )
+        if worker:
+            try:
+                from handlers.worker.profile import show_worker_menu
+                bot.send_chat_action(chat_id, 'typing')
+                show_worker_menu(chat_id, worker)
+            except:
+                bot.send_message(chat_id, f"{Icons.INFO} Perfil activo, menú no disponible.")
+            return
+
+        # Iniciar registro
+        set_state(chat_id, "WORKER_SELECTING_SERVICES", {"selected_services": []})
+
+        text = (
+            f"{Icons.BRIEFCASE} <b>Registro de Profesional</b>\n\n"
+            f"Vamos a configurar tu perfil paso a paso.\n\n"
+            f"<b>Paso 1/5:</b> Seleccioná los servicios que ofrecés\n"
+            f"{Icons.INFO} Podés seleccionar varios."
+        )
+        bot.send_message(chat_id, text, reply_markup=get_service_selector([]), parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"[FLOW START ERROR] chat_id={chat_id} -> {e}")
+        bot.send_message(chat_id, f"{Icons.ERROR} Error iniciando flujo de registro.")
+
+# ==================== SELECCIÓN DE SERVICIOS ====================
+@bot.callback_query_handler(func=lambda c: c.data.startswith("svc_toggle:"))
+def handle_service_toggle(call):
+    chat_id = call.message.chat.id
+    service_id = call.data.split(":")[1]
+
+    try:
+        session = get_session(chat_id)
+        if not session:
+            bot.answer_callback_query(call.id, "Sesión perdida. Iniciá de nuevo.", show_alert=True)
+            return
+
+        selected = session["data"].get("selected_services", [])
+        if service_id in selected:
+            selected.remove(service_id)
+            bot.answer_callback_query(call.id, f"❌ {SERVICES[service_id]['name']} removido")
+        else:
+            selected.append(service_id)
+            bot.answer_callback_query(call.id, f"✅ {SERVICES[service_id]['name']} agregado")
+
+        update_data(chat_id, selected_services=selected)
+        bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=get_service_selector(selected))
+    except Exception as e:
+        logger.error(f"[SERVICE TOGGLE ERROR] chat_id={chat_id} -> {e}")
+        bot.answer_callback_query(call.id, "❌ Ocurrió un error.", show_alert=True)
+
+@bot.callback_query_handler(func=lambda c: c.data == "svc_confirm")
+def handle_service_confirm(call):
+    chat_id = call.message.chat.id
+    selected = get_data(chat_id, "selected_services", [])
+    if not selected:
+        bot.answer_callback_query(call.id, "Seleccioná al menos un servicio", show_alert=True)
+        return
+
+    bot.answer_callback_query(call.id)
+    try:
+        bot.delete_message(chat_id, call.message.message_id)
     except:
         pass
-    clear_state(chat_id)
+
+    set_state(chat_id, "WORKER_ENTERING_PRICE", {
+        "services_to_price": selected[:],
+        "current_service_idx": 0,
+        "prices": {}
+    })
+    ask_next_price(chat_id)
+
+# ==================== PRECIOS ====================
+def ask_next_price(chat_id: str):
+    services = get_data(chat_id, "services_to_price", [])
+    idx = get_data(chat_id, "current_service_idx", 0)
+
+    if idx >= len(services):
+        set_state(chat_id, "WORKER_ENTERING_NAME")
+        ask_worker_name(chat_id)
+        return
+
+    service_id = services[idx]
+    service_name = SERVICES.get(service_id, {}).get("name", service_id)
+
+    text = f"{Icons.MONEY} <b>Precio para {service_name} ({idx+1}/{len(services)})</b>\nIngresá tarifa por hora (solo números)"
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add("⏭️ Saltar", "❌ Cancelar")
+    bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
+
+@bot.message_handler(func=lambda m: get_session(m.chat.id)["state"] == "WORKER_ENTERING_PRICE")
+def handle_price_input(message):
+    chat_id = message.chat.id
+    text = message.text.strip()
+    if text == "❌ Cancelar":
+        cancel_flow(chat_id)
+        return
+
+    services = get_data(chat_id, "services_to_price", [])
+    idx = get_data(chat_id, "current_service_idx", 0)
+
+    if text == "⏭️ Saltar":
+        prices = get_data(chat_id, "prices", {})
+        prices[services[idx]] = None
+        update_data(chat_id, prices=prices, current_service_idx=idx+1)
+        ask_next_price(chat_id)
+        return
+
+    if not text.isdigit():
+        bot.send_message(chat_id, "❌ Ingresá solo números.")
+        return
+
+    price = int(text)
+    prices = get_data(chat_id, "prices", {})
+    prices[services[idx]] = price
+    update_data(chat_id, prices=prices, current_service_idx=idx+1)
+    bot.send_message(chat_id, f"✅ Precio guardado: ${price}/hora")
+    ask_next_price(chat_id)
+
+# ==================== NOMBRE / TELÉFONO / DNI ====================
+def ask_worker_name(chat_id: str):
+    text = f"{Icons.USER} <b>Paso 2/5: Tu nombre</b>\n¿Cómo te llaman los clientes?"
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add("❌ Cancelar")
+    bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
+
+def ask_worker_phone(chat_id: str):
+    text = f"{Icons.PHONE} <b>Paso 3/5: Teléfono</b>\nIngresá tu número de contacto."
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add("❌ Cancelar")
+    bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
+
+def ask_worker_dni(chat_id: str):
+    text = f"{Icons.USER} <b>Paso 4/5: DNI</b>\nIngresá tu documento (7 u 8 dígitos)."
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add("❌ Cancelar")
+    bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
+
+# ==================== UBICACIÓN ====================
+def ask_worker_location(chat_id: str):
+    text = f"{Icons.LOCATION} <b>Paso 5/5: Ubicación</b>\nTocá el botón azul para enviar tu ubicación."
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    markup.add(types.KeyboardButton("📍 Enviar ubicación", request_location=True))
+    markup.add("❌ Cancelar")
+    bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
 
 # ==================== CANCELAR FLUJO ====================
 def cancel_flow(chat_id: str):
     clear_state(chat_id)
-    bot.send_message(chat_id, "❌ Registro cancelado. Escribí 'trabajar' para reiniciar.", reply_markup=types.ReplyKeyboardRemove())
+    bot.send_message(chat_id, f"{Icons.ERROR} Registro cancelado. Escribí 'trabajar' para reiniciar.", reply_markup=types.ReplyKeyboardRemove())
 
-# ==================== GUARDAR WORKER EN DB ====================
+# ==================== GUARDAR WORKER ====================
 def save_worker_data(chat_id: str, dni: str):
     name = get_data(chat_id, "worker_name")
     phone = get_data(chat_id, "worker_phone")
@@ -320,24 +466,21 @@ def save_worker_data(chat_id: str, dni: str):
     selected_services = get_data(chat_id, "selected_services", [])
 
     if not name or not phone:
-        bot.send_message(chat_id, "❌ Faltan datos. Reiniciá el registro.", reply_markup=types.ReplyKeyboardRemove())
+        bot.send_message(chat_id, f"{Icons.ERROR} Faltan datos. Reiniciá el registro.", reply_markup=types.ReplyKeyboardRemove())
         clear_state(chat_id)
         return
 
-    # Guardar datos básicos del trabajador
     db_execute("""
         INSERT OR REPLACE INTO workers (chat_id, nombre, telefono, dni_file_id, disponible, lat, lon, last_update)
         VALUES (?, ?, ?, ?, 0, NULL, NULL, NULL)
     """, (str(chat_id), name, phone, dni), commit=True)
 
-    # Borrar servicios antiguos
     db_execute("DELETE FROM worker_services WHERE chat_id=?", (str(chat_id),), commit=True)
 
-    # Guardar servicios y precios seleccionados
     for service_id in selected_services:
         precio = float(prices.get(service_id) or 0)
         db_execute(
             "INSERT OR REPLACE INTO worker_services (chat_id, service_id, precio) VALUES (?, ?, ?)",
             (str(chat_id), service_id, precio),
             commit=True
-        )
+    )
