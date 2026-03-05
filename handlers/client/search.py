@@ -5,7 +5,14 @@ from models.services_data import SERVICES
 from utils.icons import Icons
 from utils.keyboards import get_alternative_times_keyboard, get_role_keyboard
 
-# o desde models/services_data.py si es parte de ahí
+# ==================== IMPORTS ====================
+from services.request_service import (
+    create_request,
+    get_request,
+    assign_worker_to_request_safe,
+    update_request_status,
+    find_available_workers   # ✅ importante, antes estaba en utils.worker_utils
+)
 from services.request_service import create_request, update_request_status, get_request, assign_worker_to_request_safe
 from handlers.common import send_safe, edit_safe
 from handlers.client.flow import get_service_display
