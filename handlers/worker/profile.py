@@ -8,7 +8,6 @@ from models.services_data import SERVICES
 
 # ==================== MENÚ PRINCIPAL ====================
 def show_worker_menu(chat_id: str, worker_data):
-    """Muestra menú para trabajador ya registrado"""
     is_online = worker_data[3] if len(worker_data) > 3 else 0
     status_icon = Icons.ONLINE if is_online else Icons.OFFLINE
     status_text = "En línea" if is_online else "Desconectado"
@@ -22,26 +21,30 @@ def show_worker_menu(chat_id: str, worker_data):
 
     markup = types.InlineKeyboardMarkup(row_width=2)
 
-    # Sección: Conectar / Desconectar
-    if is_online:
-        markup.add(types.InlineKeyboardButton(f"{Icons.OFFLINE} Desconectarme", callback_data="worker_offline"))
-    else:
-        markup.add(types.InlineKeyboardButton(f"{Icons.ONLINE} Conectarme", callback_data="worker_online"))
-
-    # Sección: Funciones principales
+    # Conectar / Desconectar
     markup.add(
-        types.InlineKeyboardButton(f"{Icons.LOCATION} Ubicación", callback_data="worker_location"),
-        types.InlineKeyboardButton(f"{Icons.MONEY} Precios", callback_data="worker_prices"),
-        types.InlineKeyboardButton(f"{Icons.USER} Mi Perfil", callback_data="worker_profile")
+        types.InlineKeyboardButton(f"{Icons.ONLINE if not is_online else Icons.OFFLINE} {'Conectarme' if not is_online else 'Desconectarme'}",
+                                   callback_data="worker_online" if not is_online else "worker_offline")
     )
 
-    # Botón opcional: iniciar servicio si hay asignación
+    # Funciones principales
+    markup.add(
+        types.InlineKeyboardButton(f"{Icons.USER} Mi Perfil", callback_data="worker_profile"),
+        types.InlineKeyboardButton(f"{Icons.MONEY} Precios", callback_data="worker_prices"),
+        types.InlineKeyboardButton(f"{Icons.LOCATION} Ubicación", callback_data="worker_location")
+    )
+
+    # Servicio activo / iniciar servicio
     active_request = db_execute(
-        "SELECT id FROM requests WHERE worker_id=? AND status='accepted'", 
+        "SELECT id, status FROM requests WHERE worker_id=? AND status IN ('accepted','in_progress')", 
         (str(chat_id),), fetch_one=True
     )
     if active_request:
-        markup.add(types.InlineKeyboardButton("🚀 Iniciar Servicio", callback_data="start_service"))
+        req_id, status = active_request
+        if status == "accepted":
+            markup.add(types.InlineKeyboardButton("🚀 Iniciar Servicio", callback_data="start_service"))
+        elif status == "in_progress":
+            markup.add(types.InlineKeyboardButton("🟢 Servicio en progreso", callback_data="in_progress_disabled"))
 
     send_safe(chat_id, text, markup)
 
@@ -143,7 +146,6 @@ def handle_worker_location(call):
 @bot.callback_query_handler(func=lambda c: c.data == "start_service")
 def handle_start_service(call):
     chat_id = call.message.chat.id
-    # Buscar solicitud asignada al trabajador
     request = db_execute(
         "SELECT id, client_id, lat, lon FROM requests WHERE worker_id=? AND status='accepted'",
         (str(chat_id),), fetch_one=True
@@ -153,10 +155,8 @@ def handle_start_service(call):
         return
 
     request_id, client_id, lat, lon = request
-    # Actualizamos estado del servicio
     db_execute("UPDATE requests SET status='in_progress' WHERE id=?", (request_id,), commit=True)
     bot.answer_callback_query(call.id, "✅ Servicio iniciado. Enviando ubicación al cliente...")
 
-    # Enviar ubicación inicial al cliente
     bot.send_location(client_id, latitude=lat, longitude=lon)
     set_state(chat_id, UserState.WORKER_IN_SERVICE, {"request_id": request_id})
