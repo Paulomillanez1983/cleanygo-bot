@@ -70,11 +70,9 @@ def setup_webhook():
     logger.info(f"✅ Webhook configurado: {webhook_url}")
     return webhook_url
 
+# SOLO para pruebas locales: no se ejecuta bajo Gunicorn
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
-
     logger.info(f"{Icons.SUCCESS} Iniciando CleanyGo en puerto {port}")
-
     setup_webhook()
-
     app.run(host="0.0.0.0", port=port)
