@@ -64,12 +64,24 @@ def get_session(chat_id: str) -> dict:
 
 
 def set_state(chat_id: str, state: UserState, data: dict = None):
-    """Guardar o actualizar sesión en SQLite"""
+    """
+    Guardar o actualizar sesión en SQLite.
+    
+    ✅ FIX: Si data=None, preserva los datos existentes.
+    """
     chat_id = str(chat_id)
-    data_json = json.dumps(data or {})
     timestamp = int(time.time())
+    
     with sqlite3.connect(DB_FILE) as conn:
         cursor = conn.cursor()
+        
+        # ✅ FIX: Si no se proporcionan datos, obtener los existentes
+        if data is None:
+            current = get_session(chat_id)
+            data = current.get("data", {})
+        
+        data_json = json.dumps(data)
+        
         cursor.execute('''
             INSERT INTO sessions(chat_id, state, data, last_activity)
             VALUES (?, ?, ?, ?)
@@ -79,19 +91,34 @@ def set_state(chat_id: str, state: UserState, data: dict = None):
                 last_activity=excluded.last_activity
         ''', (chat_id, state.value, data_json, timestamp))
         conn.commit()
+    
+    logger.info(f"[DB] set_state: {chat_id} -> {state.value}, keys={list(data.keys())}")
 
 
 def update_data(chat_id: str, **kwargs):
     """Actualizar solo el diccionario de datos de la sesión"""
+    chat_id = str(chat_id)
     session = get_session(chat_id)
     session_data = session["data"]
     session_data.update(kwargs)
-    set_state(chat_id, UserState(session["state"]), session_data)
+    
+    # ✅ Pasar datos explícitamente para asegurar que se guarden
+    current_state_str = session.get("state", UserState.IDLE.value)
+    try:
+        current_state = UserState(current_state_str)
+    except ValueError:
+        current_state = UserState.IDLE
+    
+    set_state(chat_id, current_state, session_data)
 
 
 def get_data(chat_id: str, key: str, default=None):
+    """Obtener dato específico de la sesión"""
+    chat_id = str(chat_id)
     session = get_session(chat_id)
-    return session["data"].get(key, default)
+    result = session["data"].get(key, default)
+    logger.info(f"[DB] get_data: {chat_id}.{key} = {result}")
+    return result
 
 
 def clear_state(chat_id: str):
@@ -101,3 +128,4 @@ def clear_state(chat_id: str):
         cursor = conn.cursor()
         cursor.execute("DELETE FROM sessions WHERE chat_id = ?", (chat_id,))
         conn.commit()
+    logger.info(f"[DB] clear_state: {chat_id}")
