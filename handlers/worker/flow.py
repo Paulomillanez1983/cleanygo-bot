@@ -20,46 +20,66 @@ apihelper.SESSION_TIME_TO_LIVE = 10 * 60
 
 # ==================== SESIONES EN SQLITE ====================
 def get_session(chat_id: str):
-    row = db_execute("SELECT state, data FROM sessions WHERE chat_id = ?", (str(chat_id),), fetch_one=True)
-    if row:
-        state, data_json = row
-        data = json.loads(data_json) if data_json else {}
-        return {"state": state, "data": data}
-    else:
-        db_execute(
-            "INSERT INTO sessions (chat_id, state, data, last_activity) VALUES (?, ?, ?, ?)",
-            (str(chat_id), "IDLE", "{}", int(time.time())),
-            commit=True
-        )
+    try:
+        row = db_execute("SELECT state, data FROM sessions WHERE chat_id = ?", (str(chat_id),), fetch_one=True)
+        if row:
+            state, data_json = row
+            data = json.loads(data_json) if data_json else {}
+            return {"state": state, "data": data}
+        else:
+            db_execute(
+                "INSERT INTO sessions (chat_id, state, data, last_activity) VALUES (?, ?, ?, ?)",
+                (str(chat_id), "IDLE", "{}", int(time.time())),
+                commit=True
+            )
+            return {"state": "IDLE", "data": {}}
+    except Exception as e:
+        logger.error(f"[SESSION ERROR] chat_id={chat_id} -> {traceback.format_exc()}")
         return {"state": "IDLE", "data": {}}
 
 def set_state(chat_id: str, state: str, data: dict = None):
-    session = get_session(chat_id)
-    new_data = session["data"]
-    if data:
-        new_data.update(data)
-    db_execute(
-        "INSERT OR REPLACE INTO sessions (chat_id, state, data, last_activity) VALUES (?, ?, ?, ?)",
-        (str(chat_id), state, json.dumps(new_data), int(time.time())),
-        commit=True
-    )
+    try:
+        session = get_session(chat_id)
+        new_data = session["data"]
+        if data:
+            new_data.update(data)
+        db_execute(
+            "INSERT OR REPLACE INTO sessions (chat_id, state, data, last_activity) VALUES (?, ?, ?, ?)",
+            (str(chat_id), state, json.dumps(new_data), int(time.time())),
+            commit=True
+        )
+        logger.info(f"[STATE SET] chat_id={chat_id} -> {state}")
+    except Exception as e:
+        logger.error(f"[SET STATE ERROR] chat_id={chat_id} -> {traceback.format_exc()}")
 
 def update_data(chat_id: str, **kwargs):
-    session = get_session(chat_id)
-    new_data = session["data"]
-    new_data.update(kwargs)
-    db_execute(
-        "UPDATE sessions SET data = ?, last_activity = ? WHERE chat_id = ?",
-        (json.dumps(new_data), int(time.time()), str(chat_id)),
-        commit=True
-    )
+    try:
+        session = get_session(chat_id)
+        new_data = session["data"]
+        new_data.update(kwargs)
+        db_execute(
+            "UPDATE sessions SET data = ?, last_activity = ? WHERE chat_id = ?",
+            (json.dumps(new_data), int(time.time()), str(chat_id)),
+            commit=True
+        )
+        logger.info(f"[DATA UPDATE] chat_id={chat_id} -> {kwargs}")
+    except Exception as e:
+        logger.error(f"[UPDATE DATA ERROR] chat_id={chat_id} -> {traceback.format_exc()}")
 
 def get_data(chat_id: str, key: str, default=None):
-    session = get_session(chat_id)
-    return session["data"].get(key, default)
+    try:
+        session = get_session(chat_id)
+        return session["data"].get(key, default)
+    except Exception as e:
+        logger.error(f"[GET DATA ERROR] chat_id={chat_id} -> {traceback.format_exc()}")
+        return default
 
 def clear_state(chat_id: str):
-    db_execute("DELETE FROM sessions WHERE chat_id = ?", (str(chat_id),), commit=True)
+    try:
+        db_execute("DELETE FROM sessions WHERE chat_id = ?", (str(chat_id),), commit=True)
+        logger.info(f"[STATE CLEAR] chat_id={chat_id}")
+    except Exception as e:
+        logger.error(f"[CLEAR STATE ERROR] chat_id={chat_id} -> {traceback.format_exc()}")
 
 # ==================== FLUJO WORKER ====================
 @bot.message_handler(regexp=r'(?i)(trabajar|prestador|quiero trabajar)')
@@ -69,7 +89,7 @@ def handle_worker_start(message):
         logger.info(f"[START] Activado por '{message.text}' | chat_id: {chat_id}")
         start_worker_flow(chat_id)
     except Exception as e:
-        logger.error(f"[START ERROR] chat_id={chat_id} -> {e}")
+        logger.error(f"[START ERROR] chat_id={chat_id} -> {traceback.format_exc()}")
         bot.send_message(chat_id, f"{Icons.ERROR} Ocurrió un error iniciando tu registro. Intentá de nuevo.")
 
 # ==================== SELECCIÓN DE SERVICIOS INLINE ====================
@@ -78,10 +98,7 @@ def get_service_selector_inline(selected_services):
     buttons = []
     for svc_id, svc in SERVICES.items():
         name = svc['name']
-        if svc_id in selected_services:
-            text = f"✅ {name}"
-        else:
-            text = name
+        text = f"✅ {name}" if svc_id in selected_services else name
         buttons.append(types.InlineKeyboardButton(text=text, callback_data=f"svc_toggle:{svc_id}"))
     buttons.append(types.InlineKeyboardButton("Confirmar ✅", callback_data="svc_confirm"))
     markup.add(*buttons)
@@ -160,180 +177,234 @@ def handle_service_confirm(call):
 
 # ==================== PRECIOS ====================
 def ask_next_price(chat_id: str):
-    services = get_data(chat_id, "services_to_price", [])
-    idx = get_data(chat_id, "current_service_idx", 0)
+    try:
+        services = get_data(chat_id, "services_to_price", [])
+        idx = get_data(chat_id, "current_service_idx", 0)
 
-    if idx >= len(services):
-        set_state(chat_id, "WORKER_ENTERING_NAME")
-        ask_worker_name(chat_id)
-        return
+        if idx >= len(services):
+            set_state(chat_id, "WORKER_ENTERING_NAME")
+            ask_worker_name(chat_id)
+            return
 
-    service_id = services[idx]
-    service_name = SERVICES.get(service_id, {}).get("name", service_id)
-    text = f"{Icons.MONEY} <b>Precio para {service_name} ({idx+1}/{len(services)})</b>\nIngresá tarifa por hora (solo números)"
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add("⏭️ Saltar")
-    markup.add("❌ Cancelar")
-    bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
+        service_id = services[idx]
+        service_name = SERVICES.get(service_id, {}).get("name", service_id)
+        text = f"{Icons.MONEY} <b>Precio para {service_name} ({idx+1}/{len(services)})</b>\nIngresá tarifa por hora (solo números)"
+        markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+        markup.add("⏭️ Saltar")
+        markup.add("❌ Cancelar")
+        bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"[ASK PRICE ERROR] chat_id={chat_id} -> {traceback.format_exc()}")
+        bot.send_message(chat_id, f"{Icons.ERROR} Error pidiendo precio. Reiniciá flujo.")
 
+# ==================== HANDLERS DE PRECIOS ====================
 @bot.message_handler(func=lambda m: get_session(m.chat.id)["state"] == "WORKER_ENTERING_PRICE")
 def handle_price_input(message):
     chat_id = message.chat.id
-    text = message.text.strip()
-    services = get_data(chat_id, "services_to_price", [])
-    idx = get_data(chat_id, "current_service_idx", 0)
-    prices = get_data(chat_id, "prices", {})
+    try:
+        text = message.text.strip()
+        services = get_data(chat_id, "services_to_price", [])
+        idx = get_data(chat_id, "current_service_idx", 0)
+        prices = get_data(chat_id, "prices", {})
 
-    if text == "❌ Cancelar":
-        cancel_flow(chat_id)
-        return
-    if text == "⏭️ Saltar":
-        prices[services[idx]] = None
+        if text == "❌ Cancelar":
+            cancel_flow(chat_id)
+            return
+        if text == "⏭️ Saltar":
+            prices[services[idx]] = None
+            update_data(chat_id, prices=prices, current_service_idx=idx+1)
+            ask_next_price(chat_id)
+            return
+        if not text.isdigit():
+            bot.send_message(chat_id, "❌ Ingresá solo números.")
+            return
+
+        price = int(text)
+        prices[services[idx]] = price
         update_data(chat_id, prices=prices, current_service_idx=idx+1)
+        bot.send_message(chat_id, f"✅ Precio guardado: ${price}/hora")
         ask_next_price(chat_id)
-        return
-    if not text.isdigit():
-        bot.send_message(chat_id, "❌ Ingresá solo números.")
-        return
-
-    price = int(text)
-    prices[services[idx]] = price
-    update_data(chat_id, prices=prices, current_service_idx=idx+1)
-    bot.send_message(chat_id, f"✅ Precio guardado: ${price}/hora")
-    ask_next_price(chat_id)
+    except Exception as e:
+        logger.error(f"[PRICE INPUT ERROR] chat_id={chat_id} -> {traceback.format_exc()}")
+        bot.send_message(chat_id, f"{Icons.ERROR} Error procesando precio. Reiniciá flujo.")
 
 # ==================== NOMBRE ====================
 def ask_worker_name(chat_id: str):
-    text = f"{Icons.USER} <b>Paso 2/5: Tu nombre</b>\n¿Cómo te llaman los clientes?"
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add("❌ Cancelar")
-    bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
+    try:
+        text = f"{Icons.USER} <b>Paso 2/5: Tu nombre</b>\n¿Cómo te llaman los clientes?"
+        markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+        markup.add("❌ Cancelar")
+        bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"[ASK NAME ERROR] chat_id={chat_id} -> {traceback.format_exc()}")
+        bot.send_message(chat_id, f"{Icons.ERROR} Error pidiendo nombre.")
 
 @bot.message_handler(func=lambda m: get_session(m.chat.id)["state"] == "WORKER_ENTERING_NAME")
 def handle_name_input(message):
     chat_id = message.chat.id
-    name = message.text.strip()
-    if name == "❌ Cancelar":
-        cancel_flow(chat_id)
-        return
-    if len(name) < 2:
-        bot.send_message(chat_id, "❌ Nombre muy corto.")
-        return
-    update_data(chat_id, worker_name=name)
-    set_state(chat_id, "WORKER_ENTERING_PHONE")
-    ask_worker_phone(chat_id)
+    try:
+        name = message.text.strip()
+        if name == "❌ Cancelar":
+            cancel_flow(chat_id)
+            return
+        if len(name) < 2:
+            bot.send_message(chat_id, "❌ Nombre muy corto.")
+            return
+        update_data(chat_id, worker_name=name)
+        set_state(chat_id, "WORKER_ENTERING_PHONE")
+        ask_worker_phone(chat_id)
+    except Exception as e:
+        logger.error(f"[NAME INPUT ERROR] chat_id={chat_id} -> {traceback.format_exc()}")
+        bot.send_message(chat_id, f"{Icons.ERROR} Error procesando nombre.")
 
 # ==================== TELÉFONO ====================
 def ask_worker_phone(chat_id: str):
-    text = f"{Icons.PHONE} <b>Paso 3/5: Teléfono</b>\nIngresá tu número de contacto."
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add(types.KeyboardButton("❌ Cancelar"))
-    bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
+    try:
+        text = f"{Icons.PHONE} <b>Paso 3/5: Teléfono</b>\nIngresá tu número de contacto."
+        markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+        markup.add(types.KeyboardButton("❌ Cancelar"))
+        bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"[ASK PHONE ERROR] chat_id={chat_id} -> {traceback.format_exc()}")
+        bot.send_message(chat_id, f"{Icons.ERROR} Error pidiendo teléfono.")
 
 @bot.message_handler(func=lambda m: get_session(m.chat.id)["state"] == "WORKER_ENTERING_PHONE")
 def handle_phone_input(message):
     chat_id = message.chat.id
-    phone = re.sub(r"\D", "", message.text.strip())
-    if message.text == "❌ Cancelar":
-        cancel_flow(chat_id)
-        return
-    if len(phone) < 8:
-        bot.send_message(chat_id, "❌ Número inválido. Ingresá al menos 8 dígitos.")
-        return
-    update_data(chat_id, worker_phone=phone)
-    set_state(chat_id, "WORKER_ENTERING_DNI")
-    ask_worker_dni(chat_id)
+    try:
+        phone = re.sub(r"\D", "", message.text.strip())
+        if message.text == "❌ Cancelar":
+            cancel_flow(chat_id)
+            return
+        if len(phone) < 8:
+            bot.send_message(chat_id, "❌ Número inválido. Ingresá al menos 8 dígitos.")
+            return
+        update_data(chat_id, worker_phone=phone)
+        set_state(chat_id, "WORKER_ENTERING_DNI")
+        ask_worker_dni(chat_id)
+    except Exception as e:
+        logger.error(f"[PHONE INPUT ERROR] chat_id={chat_id} -> {traceback.format_exc()}")
+        bot.send_message(chat_id, f"{Icons.ERROR} Error procesando teléfono.")
 
 # ==================== DNI ====================
 def ask_worker_dni(chat_id: str):
-    text = f"{Icons.USER} <b>Paso 4/5: DNI</b>\nIngresá tu documento (7 u 8 dígitos)."
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add(types.KeyboardButton("❌ Cancelar"))
-    bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
+    try:
+        text = f"{Icons.USER} <b>Paso 4/5: DNI</b>\nIngresá tu documento (7 u 8 dígitos)."
+        markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+        markup.add(types.KeyboardButton("❌ Cancelar"))
+        bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"[ASK DNI ERROR] chat_id={chat_id} -> {traceback.format_exc()}")
+        bot.send_message(chat_id, f"{Icons.ERROR} Error pidiendo DNI.")
 
 @bot.message_handler(func=lambda m: get_session(m.chat.id)["state"] == "WORKER_ENTERING_DNI")
 def handle_dni_input(message):
     chat_id = message.chat.id
-    dni = re.sub(r"\D", "", message.text.strip())
-    if message.text == "❌ Cancelar":
-        cancel_flow(chat_id)
-        return
-    if not (7 <= len(dni) <= 8):
-        bot.send_message(chat_id, "❌ DNI inválido. Debe tener 7 u 8 dígitos.")
-        return
-    save_worker_data(chat_id, dni)
-    set_state(chat_id, "WORKER_SHARING_LOCATION")
-    ask_worker_location(chat_id)
+    try:
+        dni = re.sub(r"\D", "", message.text.strip())
+        if message.text == "❌ Cancelar":
+            cancel_flow(chat_id)
+            return
+        if not (7 <= len(dni) <= 8):
+            bot.send_message(chat_id, "❌ DNI inválido. Debe tener 7 u 8 dígitos.")
+            return
+        save_worker_data(chat_id, dni)
+        set_state(chat_id, "WORKER_SHARING_LOCATION")
+        ask_worker_location(chat_id)
+    except Exception as e:
+        logger.error(f"[DNI INPUT ERROR] chat_id={chat_id} -> {traceback.format_exc()}")
+        bot.send_message(chat_id, f"{Icons.ERROR} Error procesando DNI.")
 
 # ==================== UBICACIÓN ====================
 def ask_worker_location(chat_id: str):
-    text = f"{Icons.LOCATION} <b>Paso 5/5: Ubicación</b>\nTocá el botón azul para enviar tu ubicación."
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    markup.add(types.KeyboardButton("📍 Enviar ubicación", request_location=True))
-    markup.add("❌ Cancelar")
-    bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
+    try:
+        text = f"{Icons.LOCATION} <b>Paso 5/5: Ubicación</b>\nTocá el botón azul para enviar tu ubicación."
+        markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+        markup.add(types.KeyboardButton("📍 Enviar ubicación", request_location=True))
+        markup.add("❌ Cancelar")
+        bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"[ASK LOCATION ERROR] chat_id={chat_id} -> {traceback.format_exc()}")
+        bot.send_message(chat_id, f"{Icons.ERROR} Error pidiendo ubicación.")
 
 @bot.message_handler(content_types=['location'])
 def handle_location(message):
     chat_id = message.chat.id
-    session = get_session(chat_id)
-    if not session or session["state"] != "WORKER_SHARING_LOCATION":
-        return
-    if not message.location:
-        bot.send_message(chat_id, "❌ No se recibió la ubicación. Intentá de nuevo.", reply_markup=types.ReplyKeyboardRemove())
-        return
-
-    lat = message.location.latitude
-    lon = message.location.longitude
-    timestamp = int(time.time())
-
-    worker = db_execute("SELECT chat_id FROM workers WHERE chat_id = ?", (str(chat_id),), fetch_one=True)
-    if not worker:
-        bot.send_message(chat_id, "❌ Error: Perfil no encontrado. Reiniciá con /start", reply_markup=types.ReplyKeyboardRemove())
-        return
-
-    db_execute("UPDATE workers SET lat=?, lon=?, last_update=?, disponible=1 WHERE chat_id=?",
-               (lat, lon, timestamp, str(chat_id)), commit=True)
-
-    bot.send_message(chat_id, f"{Icons.PARTY} <b>¡Registro completado!</b>\n\nYa estás activo 💪",
-                     parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
     try:
-        from handlers.worker.profile import show_worker_menu
-        worker_data = db_execute("SELECT * FROM workers WHERE chat_id=?", (str(chat_id),), fetch_one=True)
-        if worker_data:
-            show_worker_menu(chat_id, worker_data)
-    except:
-        pass
-    clear_state(chat_id)
+        session = get_session(chat_id)
+        if not session or session["state"] != "WORKER_SHARING_LOCATION":
+            return
+        if not message.location:
+            bot.send_message(chat_id, "❌ No se recibió la ubicación. Intentá de nuevo.", reply_markup=types.ReplyKeyboardRemove())
+            return
+
+        lat = message.location.latitude
+        lon = message.location.longitude
+        timestamp = int(time.time())
+
+        worker = db_execute("SELECT chat_id FROM workers WHERE chat_id = ?", (str(chat_id),), fetch_one=True)
+        if not worker:
+            bot.send_message(chat_id, "❌ Error: Perfil no encontrado. Reiniciá con /start", reply_markup=types.ReplyKeyboardRemove())
+            return
+
+        db_execute("UPDATE workers SET lat=?, lon=?, last_update=?, disponible=1 WHERE chat_id=?",
+                   (lat, lon, timestamp, str(chat_id)), commit=True)
+
+        bot.send_message(chat_id, f"{Icons.PARTY} <b>¡Registro completado!</b>\n\nYa estás activo 💪",
+                         parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
+        try:
+            from handlers.worker.profile import show_worker_menu
+            worker_data = db_execute("SELECT * FROM workers WHERE chat_id=?", (str(chat_id),), fetch_one=True)
+            if worker_data:
+                show_worker_menu(chat_id, worker_data)
+        except Exception as e:
+            logger.error(f"[SHOW WORKER MENU ERROR] chat_id={chat_id} -> {traceback.format_exc()}")
+        clear_state(chat_id)
+    except Exception as e:
+        logger.error(f"[LOCATION ERROR] chat_id={chat_id} -> {traceback.format_exc()}")
+        bot.send_message(chat_id, f"{Icons.ERROR} Error procesando ubicación.")
 
 # ==================== CANCELAR FLUJO ====================
 def cancel_flow(chat_id: str):
-    clear_state(chat_id)
-    bot.send_message(chat_id, f"{Icons.ERROR} Registro cancelado. Escribí 'trabajar' para reiniciar.", reply_markup=types.ReplyKeyboardRemove())
+    try:
+        clear_state(chat_id)
+        bot.send_message(chat_id, f"{Icons.ERROR} Registro cancelado. Escribí 'trabajar' para reiniciar.", reply_markup=types.ReplyKeyboardRemove())
+    except Exception as e:
+        logger.error(f"[CANCEL FLOW ERROR] chat_id={chat_id} -> {traceback.format_exc()}")
 
 # ==================== GUARDAR WORKER EN DB ====================
 def save_worker_data(chat_id: str, dni: str):
-    name = get_data(chat_id, "worker_name")
-    phone = get_data(chat_id, "worker_phone")
-    prices = get_data(chat_id, "prices", {})
-    selected_services = get_data(chat_id, "selected_services", [])
+    try:
+        name = get_data(chat_id, "worker_name")
+        phone = get_data(chat_id, "worker_phone")
+        prices = get_data(chat_id, "prices", {})
+        selected_services = get_data(chat_id, "selected_services", [])
 
-    if not name or not phone:
-        bot.send_message(chat_id, f"{Icons.ERROR} Faltan datos. Reiniciá el registro.", reply_markup=types.ReplyKeyboardRemove())
+        if not name or not phone:
+            bot.send_message(chat_id, f"{Icons.ERROR} Faltan datos. Reiniciá el registro.", reply_markup=types.ReplyKeyboardRemove())
+            clear_state(chat_id)
+            return
+
+        # Guardar información principal del trabajador
+        db_execute("""
+            INSERT OR REPLACE INTO workers 
+            (chat_id, nombre, telefono, dni, disponible, lat, lon, last_update)
+            VALUES (?, ?, ?, ?, 0, NULL, NULL, NULL)
+        """, (str(chat_id), name, phone, dni), commit=True)
+
+        # Limpiar servicios anteriores
+        db_execute("DELETE FROM worker_services WHERE chat_id=?", (str(chat_id),), commit=True)
+
+        # Guardar servicios seleccionados y sus precios
+        for service_id in selected_services:
+            precio = float(prices.get(service_id) or 0)
+            db_execute(
+                "INSERT OR REPLACE INTO worker_services (chat_id, service_id, precio) VALUES (?, ?, ?)",
+                (str(chat_id), service_id, precio),
+                commit=True
+            )
+        logger.info(f"[WORKER SAVED] chat_id={chat_id}, servicios={selected_services}, precios={prices}")
+    except Exception as e:
+        logger.error(f"[SAVE WORKER ERROR] chat_id={chat_id} -> {traceback.format_exc()}")
+        bot.send_message(chat_id, f"{Icons.ERROR} Ocurrió un error guardando tus datos.")
         clear_state(chat_id)
-        return
-
-    db_execute("""
-        INSERT OR REPLACE INTO workers (chat_id, nombre, telefono, dni_file_id, disponible, lat, lon, last_update)
-        VALUES (?, ?, ?, ?, 0, NULL, NULL, NULL)
-    """, (str(chat_id), name, phone, dni), commit=True)
-
-    db_execute("DELETE FROM worker_services WHERE chat_id=?", (str(chat_id),), commit=True)
-
-    for service_id in selected_services:
-        precio = float(prices.get(service_id) or 0)
-        db_execute(
-            "INSERT OR REPLACE INTO worker_services (chat_id, service_id, precio) VALUES (?, ?, ?)",
-            (str(chat_id), service_id, precio),
-            commit=True
-    )
