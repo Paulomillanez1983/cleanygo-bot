@@ -1,89 +1,81 @@
 #!/usr/bin/env python3
 """
-CleanyGo Bot - Optimizado para Railway
+CleanyGo Bot - Entrada principal para Railway (Lazy Loading)
 """
 
 import os
-import gevent
-from flask import Flask, request, jsonify
-from telebot.types import Update
+import sys
+from flask import Flask, jsonify
 
+# ==================== APP FLASK (sin inicializar nada) ====================
 app = Flask(__name__)
 
-# ----- INICIALIZACIÓN -----
 _initialized = False
 _bot = None
 
-def init_app():
-    """Inicializa todo una sola vez por worker"""
+def _init():
+    """Inicializa todo - llamado solo cuando se necesita"""
     global _initialized, _bot
     
     if _initialized:
         return _bot
+    
+    print("[INIT] Iniciando CleanyGo...", file=sys.stderr)
+    
+    # 1. Base de datos
+    try:
+        from database import init_db
+        init_db()
+        print("[INIT] ✅ Base de datos OK", file=sys.stderr)
+    except Exception as e:
+        print(f"[INIT] ❌ Error DB: {e}", file=sys.stderr)
+        raise
+    
+    # 2. Bot y handlers
+    try:
+        from config import TOKEN
+        if not TOKEN:
+            raise RuntimeError("BOT_TOKEN no definido")
         
-    # DB
-    from database import init_db
-    init_db()
+        from telebot import TeleBot
+        _bot = TeleBot(TOKEN, parse_mode="HTML")
+        print(f"[INIT] ✅ Bot creado (token: {TOKEN[:10]}...)", file=sys.stderr)
+        
+        # Importar handlers AHORA que bot existe
+        import handlers.common
+        import handlers.client.flow
+        import handlers.client.search
+        import handlers.client.callbacks
+        import handlers.worker.flow
+        import handlers.worker.jobs
+        import handlers.worker.profile
+        print("[INIT] ✅ Handlers cargados", file=sys.stderr)
+        
+    except Exception as e:
+        print(f"[INIT] ❌ Error Bot: {e}", file=sys.stderr)
+        raise
     
-    # Bot
-    from config import TOKEN
-    if not TOKEN:
-        raise RuntimeError("BOT_TOKEN no definido")
-    
-    from telebot import TeleBot
-    _bot = TeleBot(TOKEN, parse_mode="HTML")
-    
-    # Handlers (importar después de tener bot)
-    import handlers.common
-    import handlers.client.flow
-    import handlers.client.search
-    import handlers.client.callbacks
-    import handlers.worker.flow
-    import handlers.worker.jobs
-    import handlers.worker.profile
-    
-    # Webhook (solo si somos el worker maestro)
-    if os.environ.get('GUNICORN_WORKER_ID') == '0' or not os.environ.get('GUNICORN_WORKER_ID'):
-        _setup_webhook_once(_bot)
+    # 3. Webhook (solo si tenemos dominio)
+    try:
+        domain = os.environ.get('RAILWAY_PUBLIC_DOMAIN')
+        if domain and _bot:
+            webhook_url = f"https://{domain}/webhook"
+            _bot.remove_webhook()
+            _bot.set_webhook(url=webhook_url)
+            print(f"[INIT] ✅ Webhook: {webhook_url}", file=sys.stderr)
+    except Exception as e:
+        print(f"[INIT] ⚠️ Webhook error: {e}", file=sys.stderr)
+        # No crashea si el webhook falla
     
     _initialized = True
     return _bot
 
-def _setup_webhook_once(bot_instance):
-    """Configura webhook con manejo de rate limits"""
-    try:
-        domain = os.environ.get('RAILWAY_PUBLIC_DOMAIN')
-        if not domain:
-            return
-            
-        webhook_url = f"https://{domain}/webhook"
-        
-        # Verificar estado actual
-        info = bot_instance.get_webhook_info()
-        if info.url == webhook_url and not info.pending_update_count:
-            return  # Ya está OK
-            
-        # Configurar con retry
-        import time
-        for attempt in range(3):
-            try:
-                bot_instance.remove_webhook()
-                time.sleep(0.5)
-                bot_instance.set_webhook(url=webhook_url)
-                print(f"✅ Webhook OK: {webhook_url}")
-                return
-            except Exception as e:
-                if "429" in str(e):
-                    time.sleep(2 ** attempt)  # Exponential backoff
-                else:
-                    raise
-    except Exception as e:
-        print(f"⚠️ Webhook error (no crítico): {e}")
+# ==================== RUTAS ====================
 
-# ----- RUTAS -----
 @app.route('/')
 @app.route('/health')
 def health():
+    """Healthcheck - siempre responde 200"""
     return jsonify({
         "status": "healthy",
         "initialized": _initialized,
@@ -92,7 +84,12 @@ def health():
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    bot_instance = init_app()
+    """Endpoint de Telegram"""
+    bot = _init()  # Inicializa si es necesario
+    
+    from flask import request
+    from telebot.types import Update
+    import gevent
     
     if request.headers.get('content-type') != 'application/json':
         return 'Forbidden', 403
@@ -100,12 +97,21 @@ def webhook():
     json_string = request.get_data().decode('utf-8')
     update = Update.de_json(json_string)
     
-    # Procesar asíncronamente
-    gevent.spawn(bot_instance.process_new_updates, [update])
+    # Procesar en background
+    gevent.spawn(bot.process_new_updates, [update])
     return '', 200
 
-# ----- LOCAL -----
+# ==================== INICIALIZACIÓN AL ARRANCAR ====================
+# Esto se ejecuta cuando Gunicorn carga la app, no al importar
+with app.app_context():
+    try:
+        _init()
+    except Exception as e:
+        print(f"[INIT] Error en contexto: {e}", file=sys.stderr)
+        # No raise - dejar que healthcheck falle si hay error grave
+
+# ==================== LOCAL ====================
 if __name__ == "__main__":
-    init_app()
+    _init()
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
