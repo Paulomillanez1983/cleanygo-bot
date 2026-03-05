@@ -55,7 +55,7 @@ def find_available_workers(service_id, lat, lon, hora):
     available = []
     for w in workers:
         w_chat, w_lat, w_lon = w
-        if w_lat and w_lon:
+        if w_chat and w_lat and w_lon:
             distance = ((lat - w_lat)**2 + (lon - w_lon)**2)**0.5
             available.append((w_chat, distance))
     available.sort(key=lambda x: x[1])  # más cercano primero
@@ -67,7 +67,11 @@ def assign_worker_to_request_safe(request_id, worker_chat_id):
     Retorna True si tuvo éxito, False si ya fue tomado.
     """
     request = get_request(request_id)
-    if not request or request.get("worker_chat_id"):
+    if not request:
+        logger.error(f"[ASSIGN_SAFE] request_id={request_id} no existe")
+        return False
+    if request.get("worker_chat_id"):
+        logger.warning(f"[ASSIGN_SAFE] request_id={request_id} ya tiene worker={request.get('worker_chat_id')}")
         return False
     try:
         db_execute(
@@ -107,29 +111,32 @@ def handle_job_accept(call):
     # ===================== ACTUALIZAR SESIÓN DEL TRABAJADOR =====================
     set_state(chat_id, UserState.JOB_IN_PROGRESS, {
         "request_id": request_id,
-        "client_id": request["client_chat_id"],
-        "service_id": request["service_id"],
-        "hora": request["hora"]
+        "client_id": request.get("client_chat_id"),
+        "service_id": request.get("service_id"),
+        "hora": request.get("hora")
     })
 
     bot.answer_callback_query(call.id, "✅ ¡Trabajo asignado!")
     edit_safe(chat_id, call.message.message_id, f"""
 {Icons.SUCCESS} <b>¡Trabajo confirmado!</b>
 {Icons.INFO} Contactá al cliente para coordinar.
-{Icons.PHONE} <b>Cliente:</b> {request['client_chat_id']}
+{Icons.PHONE} <b>Cliente:</b> {request.get('client_chat_id')}
 """)
 
     # ==================== NOTIFICAR AL CLIENTE =====================
-    client_id = request["client_chat_id"]
-    service_id = request["service_id"]
-    hora = request["hora"]
+    client_id = request.get("client_chat_id")
+    service_id = request.get("service_id")
+    hora = request.get("hora")
+    if not client_id:
+        logger.error(f"[JOB_ACCEPT] No se pudo notificar: client_id es None request_id={request_id}")
+        return
 
     worker_price_info = db_execute(
         "SELECT precio FROM worker_services WHERE chat_id = ? AND service_id = ?",
         (chat_id, service_id),
         fetch_one=True
     )
-    price = worker_price_info[0] if worker_price_info else 0
+    price = worker_price_info[0] if worker_price_info and worker_price_info[0] is not None else SERVICES_PRICES.get(service_id, {}).get("price", 0)
     service_name = SERVICES_PRICES.get(service_id, {"name": service_id.capitalize()})["name"]
 
     client_text = f"""
@@ -166,31 +173,35 @@ def handle_client_accept(call):
     update_request_status(request_id, "accepted")
     edit_safe(client_id, call.message.message_id, f"{Icons.SUCCESS} Gracias, aceptaste el servicio ✅")
 
-    worker_id = request.get("worker_chat_id") or get_request(request_id).get("worker_chat_id")
-    if worker_id:
-        send_safe(worker_id, f"{Icons.SUCCESS} El cliente aceptó el servicio. ¡Podés realizarlo!")
-        set_state(worker_id, UserState.JOB_IN_PROGRESS, {
-            "request_id": request_id,
-            "client_id": client_id,
-            "service_id": request["service_id"],
-            "hora": request["hora"]
-        })
+    worker_id = request.get("worker_chat_id")
+    if not worker_id:
+        logger.error(f"[CLIENT_ACCEPT] No hay worker asignado para request_id={request_id}")
+        send_safe(client_id, f"{Icons.ERROR} No hay profesional asignado aún.")
+        return
 
-        # Botón para iniciar servicio
-        markup = types.InlineKeyboardMarkup(row_width=1)
-        markup.add(types.InlineKeyboardButton(f"{Icons.PLAY} Iniciar servicio", callback_data=f"start_job:{request_id}"))
-        send_safe(worker_id, f"{Icons.INFO} Podés iniciar el servicio ahora.", markup)
+    send_safe(worker_id, f"{Icons.SUCCESS} El cliente aceptó el servicio. ¡Podés realizarlo!")
+    set_state(worker_id, UserState.JOB_IN_PROGRESS, {
+        "request_id": request_id,
+        "client_id": client_id,
+        "service_id": request.get("service_id"),
+        "hora": request.get("hora")
+    })
 
-        # Integrar botón extra en menú principal
-        worker_data = db_execute("SELECT * FROM workers WHERE chat_id=?", (str(worker_id),), fetch_one=True)
-        if worker_data:
-            try:
-                from handlers.worker.main import show_worker_menu
-                show_worker_menu(worker_id, worker_data, extra_buttons=[
-                    types.InlineKeyboardButton(f"{Icons.PLAY} Iniciar servicio", callback_data=f"start_job:{request_id}")
-                ])
-            except Exception as e:
-                logger.error(f"[CLIENT_ACCEPT] error mostrando menú worker_id={worker_id}: {e}")
+    # Botón para iniciar servicio
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup.add(types.InlineKeyboardButton(f"{Icons.PLAY} Iniciar servicio", callback_data=f"start_job:{request_id}"))
+    send_safe(worker_id, f"{Icons.INFO} Podés iniciar el servicio ahora.", markup)
+
+    # Integrar botón extra en menú principal del worker
+    worker_data = db_execute("SELECT * FROM workers WHERE chat_id=?", (str(worker_id),), fetch_one=True)
+    if worker_data:
+        try:
+            from handlers.worker.main import show_worker_menu
+            show_worker_menu(worker_id, worker_data, extra_buttons=[
+                types.InlineKeyboardButton(f"{Icons.PLAY} Iniciar servicio", callback_data=f"start_job:{request_id}")
+            ])
+        except Exception as e:
+            logger.error(f"[CLIENT_ACCEPT] error mostrando menú worker_id={worker_id}: {e}")
 
 # ===================== HANDLER: CLIENTE RECHAZA =====================
 @bot.callback_query_handler(func=lambda c: c.data.startswith("client_reject:"))
@@ -241,7 +252,7 @@ def handle_start_job(call):
         edit_safe(chat_id, call.message.message_id, f"{Icons.ERROR} Trabajo no encontrado")
         return
 
-    client_id = request["client_chat_id"]
+    client_id = request.get("client_chat_id")
     edit_safe(chat_id, call.message.message_id, f"{Icons.SUCCESS} Servicio iniciado. Enviando ubicación al cliente...")
 
     set_state(chat_id, UserState.JOB_IN_PROGRESS, {
@@ -258,7 +269,7 @@ def handle_start_job(call):
                 (str(chat_id),),
                 fetch_one=True
             )
-            if worker_data and worker_data[0] and worker_data[1]:
+            if worker_data and worker_data[0] is not None and worker_data[1] is not None:
                 lat, lon = worker_data
                 bot.send_location(client_id, latitude=lat, longitude=lon)
             else:
@@ -284,7 +295,7 @@ def handle_finish_job(call):
         edit_safe(chat_id, call.message.message_id, f"{Icons.ERROR} Trabajo no encontrado")
         return
 
-    client_id = request["client_chat_id"]
+    client_id = request.get("client_chat_id")
 
     # Detener hilo de ubicación
     if chat_id in active_tracking:
