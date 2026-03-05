@@ -1,13 +1,13 @@
 """
 Handlers para gestión de trabajos/asignaciones para profesionales.
-Incluye aceptación/rechazo del cliente según el precio y actualización de sesión.
+Incluye aceptación/rechazo del cliente según el precio, búsqueda de trabajadores disponibles y actualización de sesión.
 """
 
 from telebot import types
 from config import bot, logger, DB_FILE
 from models.user_state import set_state, UserState
 from utils.icons import Icons
-from services.request_service import assign_worker_to_request_safe, get_request, update_request_status
+from services.request_service import get_request, update_request_status
 from handlers.common import send_safe, edit_safe
 from database import db_execute
 import time
@@ -21,7 +21,7 @@ SERVICES_PRICES = {
     "plomeria": {"name": "Plomería", "price": 2500},
 }
 
-# ===================== CREAR TABLA RECHAZOS =====================
+# ===================== TABLA DE RECHAZOS =====================
 def init_request_rejections_table():
     with sqlite3.connect(DB_FILE) as conn:
         cursor = conn.cursor()
@@ -37,6 +37,48 @@ def init_request_rejections_table():
     logger.info("✅ Tabla request_rejections inicializada")
 
 init_request_rejections_table()
+
+# ===================== FUNCIONES AUXILIARES =====================
+def find_available_workers(service_id, lat, lon, hora):
+    """
+    Retorna lista de trabajadores disponibles [(chat_id, distancia), ...], status y extra info
+    """
+    workers = db_execute(
+        "SELECT chat_id, lat, lon FROM workers WHERE service_id=? AND available=1",
+        (service_id,),
+        fetch_all=True
+    )
+    if not workers:
+        return [], "no_workers", {}
+
+    # Calcular proximidad aproximada (simplificado)
+    available = []
+    for w in workers:
+        w_chat, w_lat, w_lon = w
+        if w_lat and w_lon:
+            distance = ((lat - w_lat)**2 + (lon - w_lon)**2)**0.5
+            available.append((w_chat, distance))
+    available.sort(key=lambda x: x[1])  # más cercano primero
+    return available, "ok", {"total": len(available)}
+
+def assign_worker_to_request_safe(request_id, worker_chat_id):
+    """
+    Asigna worker a request si todavía está disponible.
+    Retorna True si tuvo éxito, False si ya fue tomado.
+    """
+    request = get_request(request_id)
+    if not request or request.get("worker_chat_id"):
+        return False
+    try:
+        db_execute(
+            "UPDATE requests SET worker_chat_id=?, status='pending' WHERE id=? AND (worker_chat_id IS NULL OR worker_chat_id='')",
+            (str(worker_chat_id), request_id),
+            commit=True
+        )
+        return True
+    except Exception as e:
+        logger.error(f"[ASSIGN_SAFE] Error asignando worker={worker_chat_id} a request_id={request_id}: {e}")
+        return False
 
 # ===================== HANDLER: TRABAJADOR ACEPTA TRABAJO =====================
 @bot.callback_query_handler(func=lambda c: c.data.startswith("job_accept:"))
@@ -134,17 +176,16 @@ def handle_client_accept(call):
             "hora": request["hora"]
         })
 
-        # ===================== BOTÓN PARA INICIAR SERVICIO =====================
+        # Botón para iniciar servicio
         markup = types.InlineKeyboardMarkup(row_width=1)
         markup.add(types.InlineKeyboardButton(f"{Icons.PLAY} Iniciar servicio", callback_data=f"start_job:{request_id}"))
         send_safe(worker_id, f"{Icons.INFO} Podés iniciar el servicio ahora.", markup)
 
-        # ===================== INTEGRAR BOTÓN EN MENÚ PRINCIPAL =====================
+        # Integrar botón extra en menú principal
         worker_data = db_execute("SELECT * FROM workers WHERE chat_id=?", (str(worker_id),), fetch_one=True)
         if worker_data:
             try:
                 from handlers.worker.main import show_worker_menu
-                # enviar extra_buttons opcional
                 show_worker_menu(worker_id, worker_data, extra_buttons=[
                     types.InlineKeyboardButton(f"{Icons.PLAY} Iniciar servicio", callback_data=f"start_job:{request_id}")
                 ])
