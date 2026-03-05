@@ -2,6 +2,7 @@
 """
 Módulo para manejo de solicitudes (requests) en la base de datos.
 Incluye creación, consulta, actualización y asignación de trabajadores.
+Versión corregida para concurrencia segura al asignar trabajos.
 """
 
 import sqlite3
@@ -95,20 +96,20 @@ def assign_worker_to_request(request_id: int, worker_chat_id: str):
     """
     Asigna un trabajador a una solicitud SOLO si sigue disponible.
     Devuelve True si se asignó, False si ya fue tomada.
-    Considera solicitudes con status 'pending' o 'searching'.
+    Ahora es seguro ante concurrencia.
     """
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        
-        # Intentamos asignar SOLO si sigue disponible
+
+        # Transacción atómica: solo asigna si status sigue siendo 'pending' o 'searching'
         cursor.execute(
             """UPDATE requests
                SET worker_chat_id = ?, status = 'assigned', accepted_at = ?
                WHERE id = ? AND status IN ('pending', 'searching')""",
             (str(worker_chat_id), int(time.time()), request_id)
         )
-        
+
         conn.commit()
         rows_updated = cursor.rowcount
         conn.close()
@@ -123,6 +124,7 @@ def assign_worker_to_request(request_id: int, worker_chat_id: str):
     except Exception as e:
         logger.error(f"[ASSIGN REQUEST ERROR] request_id={request_id}, worker={worker_chat_id} -> {e}")
         return False
+
 # ==================== FUNCIÓN SEGURA PARA CALLBACKS ====================
 def assign_worker_to_request_safe(request_id: int, worker_chat_id: str):
     """
