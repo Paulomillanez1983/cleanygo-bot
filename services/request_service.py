@@ -1,3 +1,9 @@
+# services/request_service.py
+"""
+Módulo para manejo de solicitudes (requests) en la base de datos.
+Incluye creación, consulta, actualización y asignación de trabajadores.
+"""
+
 import sqlite3
 import time
 import logging
