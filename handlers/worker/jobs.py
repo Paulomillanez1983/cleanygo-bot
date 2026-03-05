@@ -139,11 +139,14 @@ def handle_client_accept(call):
         markup.add(types.InlineKeyboardButton(f"{Icons.PLAY} Iniciar servicio", callback_data=f"start_job:{request_id}"))
         send_safe(worker_id, f"{Icons.INFO} Podés iniciar el servicio ahora.", markup)
 
+        # ===================== INTEGRAR BOTÓN EN MENÚ PRINCIPAL =====================
         worker_data = db_execute("SELECT * FROM workers WHERE chat_id=?", (str(worker_id),), fetch_one=True)
         if worker_data:
             try:
                 from handlers.worker.main import show_worker_menu
-                show_worker_menu(worker_id, worker_data)
+                show_worker_menu(worker_id, worker_data, extra_buttons=[
+                    types.InlineKeyboardButton(f"{Icons.PLAY} Iniciar servicio", callback_data=f"start_job:{request_id}")
+                ])
             except Exception as e:
                 logger.error(f"[CLIENT_ACCEPT] error mostrando menú worker_id={worker_id}: {e}")
 
