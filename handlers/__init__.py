@@ -1,7 +1,7 @@
-# handlers/__init__.py
 """
 Módulo de handlers - Punto de entrada principal.
 Evita imports circulares importando solo lo necesario.
+VERSIÓN CORREGIDA: Importa main.py para handlers de callbacks del worker
 """
 
 # Handlers comunes (sin dependencias problemáticas)
@@ -10,6 +10,7 @@ from . import common
 # Handlers de worker - importar desde el subpaquete worker
 from .worker import jobs
 from .worker import profile
+from .worker import main  # ✅ AGREGADO: Importar main para handlers de callbacks
 
 # Handlers de client - importar desde el subpaquete client
 from .client import search
