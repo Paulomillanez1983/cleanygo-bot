@@ -49,6 +49,7 @@ def format_price(price):
 @bot.message_handler(commands=['start'])
 def cmd_start(message):
     chat_id = message.chat.id
+    logger.info(f"[HANDLER /start] Mensaje recibido: {message.text} de {chat_id}")  # << LOG
     clear_state(chat_id)
     
     welcome_text = f"""
@@ -59,7 +60,9 @@ Conectamos personas que necesitan servicios con profesionales confiables cerca d
 <b>¿Qué necesitás hacer?</b>
     """
     
-    send_safe(chat_id, welcome_text, get_role_keyboard())
+    result = send_safe(chat_id, welcome_text, get_role_keyboard())
+    if result is None:
+        logger.error(f"[HANDLER /start] Error enviando mensaje a {chat_id}")
     set_state(chat_id, UserState.SELECTING_ROLE)
 
 @bot.message_handler(commands=['cancel'])
