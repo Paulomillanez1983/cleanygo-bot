@@ -1,0 +1,3 @@
+def find_available_workers(service_id, lat, lon, hora_completa):
+    # Devuelve lista de trabajadores disponibles o información de estado
+    ...
