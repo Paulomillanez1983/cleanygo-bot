@@ -1,11 +1,11 @@
 """
 Handlers para gestión de trabajos/asignaciones para profesionales.
-Incluye aceptación/rechazo del cliente según el precio.
+Incluye aceptación/rechazo del cliente según el precio y actualización de sesión.
 """
 
 from telebot import types
 from config import bot, logger, DB_FILE
-from models.user_state import set_state, UserState
+from models.user_state import set_state, UserState, update_data
 from utils.icons import Icons
 from services.request_service import assign_worker_to_request_safe, get_request, update_request_status
 from handlers.common import send_safe, edit_safe
@@ -62,6 +62,14 @@ def handle_job_accept(call):
         edit_safe(chat_id, call.message.message_id, f"{Icons.ERROR} <b>Trabajo no disponible</b>")
         return
 
+    # ===================== ACTUALIZAR SESIÓN DEL TRABAJADOR =====================
+    set_state(chat_id, UserState.JOB_IN_PROGRESS, {
+        "request_id": request_id,
+        "client_id": request["client_chat_id"],
+        "service_id": request["service_id"],
+        "hora": request["hora"]
+    })
+
     bot.answer_callback_query(call.id, "✅ ¡Trabajo asignado!")
     edit_safe(chat_id, call.message.message_id, f"""
 {Icons.SUCCESS} <b>¡Trabajo confirmado!</b>
@@ -101,7 +109,6 @@ Servicio: {service_name}
     send_safe(client_id, client_text, markup)
     logger.info(f"[JOB_ACCEPT] request_id={request_id} enviado al cliente para aceptación")
 
-
 # ===================== HANDLER: CLIENTE ACEPTA =====================
 @bot.callback_query_handler(func=lambda c: c.data.startswith("client_accept:"))
 def handle_client_accept(call):
@@ -115,7 +122,7 @@ def handle_client_accept(call):
         return
 
     # ===================== ACTUALIZAR ESTADO =====================
-    update_request_status(request_id, "accepted")  # Estado estandarizado para que el trabajador vea "Iniciar servicio"
+    update_request_status(request_id, "accepted")  # Estado estandarizado
 
     # ===================== NOTIFICAR CLIENTE =====================
     edit_safe(client_id, call.message.message_id, f"{Icons.SUCCESS} Gracias, aceptaste el servicio ✅")
@@ -138,7 +145,6 @@ def handle_client_accept(call):
             except Exception as e:
                 logger.error(f"[CLIENT_ACCEPT] error mostrando menú worker_id={worker_id}: {e}")
 
-
 # ===================== HANDLER: CLIENTE RECHAZA =====================
 @bot.callback_query_handler(func=lambda c: c.data.startswith("client_reject:"))
 def handle_client_reject(call):
@@ -157,7 +163,6 @@ def handle_client_reject(call):
     worker_id = request.get("worker_chat_id")
     if worker_id:
         send_safe(worker_id, f"{Icons.ERROR} El cliente rechazó el servicio. No se realizará.")
-
 
 # ===================== HANDLER: TRABAJADOR RECHAZA =====================
 @bot.callback_query_handler(func=lambda c: c.data.startswith("job_reject:"))
