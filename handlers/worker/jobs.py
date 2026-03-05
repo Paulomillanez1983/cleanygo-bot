@@ -8,10 +8,69 @@ from models.user_state import set_state, UserState
 from models.services_data import SERVICES
 from utils.icons import Icons
 from utils.keyboards import get_job_response_keyboard
-from services.request_service import get_request, assign_worker_to_request
+from services.request_service import assign_worker_to_request
 from handlers.common import send_safe, edit_safe
 import time
 from database import db_execute
+
+# ===================== UTILS =====================
+
+def get_request(request_id: int):
+    """Obtiene una solicitud por ID y devuelve un diccionario"""
+    row = db_execute(
+        "SELECT id, client_chat_id, service_id, worker_chat_id, hora, lat, lon, status, accepted_at "
+        "FROM requests WHERE id = ?", 
+        (request_id,), 
+        fetch_one=True
+    )
+    if not row:
+        return None
+    keys = ["id", "client_chat_id", "service_id", "worker_chat_id", 
+            "hora", "lat", "lon", "status", "accepted_at"]
+    return dict(zip(keys, row))
+
+
+def create_request(client_chat_id: str, service_id: str, hora: str, 
+                   lat: float, lon: float, status: str = 'waiting_acceptance'):
+    """Crea una nueva solicitud"""
+    result = db_execute(
+        """INSERT INTO requests (client_chat_id, service_id, hora, lat, lon, status) 
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (str(client_chat_id), service_id, hora, lat, lon, status),
+        commit=True
+    )
+    
+    if result is not None:
+        return db_execute("SELECT last_insert_rowid()", fetch_one=True)[0]
+    return None
+
+
+def update_request_status(request_id: int, status: str, worker_chat_id: str = None):
+    """Actualiza estado de una solicitud"""
+    if worker_chat_id:
+        return db_execute(
+            """UPDATE requests SET status = ?, worker_chat_id = ?, accepted_at = ? 
+               WHERE id = ?""",
+            (status, str(worker_chat_id), int(time.time()), request_id),
+            commit=True
+        )
+    return db_execute(
+        "UPDATE requests SET status = ? WHERE id = ?",
+        (status, request_id),
+        commit=True
+    )
+
+
+def assign_worker_to_request_safe(request_id: int, worker_chat_id: str):
+    """Asigna un trabajador a una solicitud SOLO si sigue disponible"""
+    return db_execute(
+        """UPDATE requests
+           SET worker_chat_id = ?, status = 'assigned', accepted_at = ?
+           WHERE id = ? AND status = 'waiting_acceptance'""",
+        (str(worker_chat_id), int(time.time()), request_id),
+        commit=True
+    )
+
 
 # ===================== HANDLERS =====================
 
@@ -22,21 +81,19 @@ def handle_job_accept(call):
     
     request = get_request(request_id)
     
-    # Validar existencia y disponibilidad
     if not request:
         bot.answer_callback_query(call.id, "❌ Este trabajo no existe")
         edit_safe(chat_id, call.message.message_id, 
                   f"{Icons.ERROR} <b>Trabajo no disponible</b>\n\nNo se encontró la solicitud.")
         return
     
-    if request[7] != 'waiting_acceptance':  # índice 7 = status
+    if request["status"] != 'waiting_acceptance':
         bot.answer_callback_query(call.id, "❌ Este trabajo ya fue tomado por otro profesional")
         edit_safe(chat_id, call.message.message_id, 
                   f"{Icons.ERROR} <b>Trabajo no disponible</b>\n\nYa fue asignado a otro profesional.")
         return
     
-    # Asignar el trabajador
-    assign_worker_to_request(request_id, chat_id)
+    assign_worker_to_request_safe(request_id, chat_id)
     bot.answer_callback_query(call.id, "✅ ¡Trabajo asignado!")
     
     # Mensaje al trabajador
@@ -45,16 +102,15 @@ def handle_job_accept(call):
 
 {Icons.INFO} Contactá al cliente para coordinar los detalles.
 
-{Icons.PHONE} <b>Cliente:</b> {request[1]}
+{Icons.PHONE} <b>Cliente:</b> {request['client_chat_id']}
     """
     edit_safe(chat_id, call.message.message_id, worker_text)
     
     # Notificar al cliente
-    client_id = request[1]
-    service_id = request[2]
-    hora = request[4]
+    client_id = request["client_chat_id"]
+    service_id = request["service_id"]
+    hora = request["hora"]
     
-    # Importar lazy para evitar ciclo circular
     from handlers.client.flow import get_service_display
     
     client_text = f"""
@@ -92,55 +148,3 @@ def handle_job_reject(call):
 Te seguiremos notificando de nuevas oportunidades.
     """
     edit_safe(chat_id, call.message.message_id, text)
-
-# ===================== SERVICE FUNCTIONS =====================
-
-def create_request(client_chat_id: str, service_id: str, hora: str, 
-                   lat: float, lon: float, status: str = 'waiting_acceptance'):
-    """Crea una nueva solicitud"""
-    result = db_execute(
-        """INSERT INTO requests (client_chat_id, service_id, hora, lat, lon, status) 
-           VALUES (?, ?, ?, ?, ?, ?)""",
-        (str(client_chat_id), service_id, hora, lat, lon, status),
-        commit=True
-    )
-    
-    if result is not None:
-        return db_execute("SELECT last_insert_rowid()", fetch_one=True)[0]
-    return None
-
-
-def get_request(request_id: int):
-    """Obtiene una solicitud por ID"""
-    return db_execute(
-        "SELECT * FROM requests WHERE id = ?", 
-        (request_id,), 
-        fetch_one=True
-    )
-
-
-def update_request_status(request_id: int, status: str, worker_chat_id: str = None):
-    """Actualiza estado de una solicitud"""
-    if worker_chat_id:
-        return db_execute(
-            """UPDATE requests SET status = ?, worker_chat_id = ?, accepted_at = ? 
-               WHERE id = ?""",
-            (status, str(worker_chat_id), int(time.time()), request_id),
-            commit=True
-        )
-    return db_execute(
-        "UPDATE requests SET status = ? WHERE id = ?",
-        (status, request_id),
-        commit=True
-    )
-
-
-def assign_worker_to_request(request_id: int, worker_chat_id: str):
-    """Asigna un trabajador a una solicitud SOLO si sigue disponible"""
-    return db_execute(
-        """UPDATE requests
-           SET worker_chat_id = ?, status = 'assigned', accepted_at = ?
-           WHERE id = ? AND status = 'waiting_acceptance'""",
-        (str(worker_chat_id), int(time.time()), request_id),
-        commit=True
-    )
