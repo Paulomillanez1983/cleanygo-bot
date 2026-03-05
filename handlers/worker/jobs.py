@@ -195,3 +195,82 @@ def handle_job_reject(call):
         logger.info(f"[JOB_REJECT] Registro de rechazo guardado: request_id={request_id}, worker={chat_id}")
     except Exception as e:
         logger.error(f"[JOB_REJECT] Error guardando rechazo request_id={request_id}, worker={chat_id}: {e}")
+# ===================== HANDLER: TRABAJADOR INICIA SERVICIO =====================
+from threading import Thread
+
+active_tracking = {}  # chat_id -> hilo de ubicación
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith("start_job:"))
+def handle_start_job(call):
+    chat_id = call.message.chat.id
+    request_id = int(call.data.split(":")[1])
+    request = get_request(request_id)
+
+    if not request:
+        edit_safe(chat_id, call.message.message_id, f"{Icons.ERROR} Trabajo no encontrado")
+        return
+
+    client_id = request["client_chat_id"]
+    edit_safe(chat_id, call.message.message_id, f"{Icons.SUCCESS} Servicio iniciado. Enviando ubicación al cliente...")
+
+    # ===================== ACTUALIZAR SESIÓN DEL TRABAJADOR =====================
+    set_state(chat_id, UserState.JOB_IN_PROGRESS, {
+        "request_id": request_id,
+        "client_id": client_id
+    })
+
+    # ===================== MENSAJE PARA CLIENTE =====================
+    send_safe(client_id, f"{Icons.INFO} El profesional comenzó el servicio. Recibirás ubicación en tiempo real.")
+
+    # ===================== HILO PARA ENVIAR UBICACIÓN =====================
+    def location_loop():
+        while True:
+            worker_data = db_execute(
+                "SELECT lat, lon FROM workers WHERE chat_id=?",
+                (str(chat_id),),
+                fetch_one=True
+            )
+            if worker_data and worker_data[0] and worker_data[1]:
+                lat, lon = worker_data
+                bot.send_location(client_id, latitude=lat, longitude=lon)
+            else:
+                bot.send_message(client_id, f"{Icons.ERROR} Ubicación no disponible")
+            time.sleep(10)  # cada 10 segundos
+
+    thread = Thread(target=location_loop, daemon=True)
+    thread.start()
+    active_tracking[chat_id] = thread
+
+    # ===================== BOTÓN PARA FINALIZAR SERVICIO =====================
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        types.InlineKeyboardButton(f"{Icons.STOP} Finalizar servicio", callback_data=f"finish_job:{request_id}")
+    )
+    send_safe(chat_id, f"{Icons.INFO} Podés finalizar el servicio cuando termines.", markup)
+
+
+# ===================== HANDLER: TRABAJADOR FINALIZA SERVICIO =====================
+@bot.callback_query_handler(func=lambda c: c.data.startswith("finish_job:"))
+def handle_finish_job(call):
+    chat_id = call.message.chat.id
+    request_id = int(call.data.split(":")[1])
+    request = get_request(request_id)
+
+    if not request:
+        edit_safe(chat_id, call.message.message_id, f"{Icons.ERROR} Trabajo no encontrado")
+        return
+
+    client_id = request["client_chat_id"]
+
+    # Detener el hilo de ubicación
+    thread = active_tracking.get(chat_id)
+    if thread:
+        active_tracking.pop(chat_id, None)
+
+    # Actualizar estado
+    set_state(chat_id, UserState.SELECTING_ROLE)  # Volvemos a rol inicial
+    update_request_status(request_id, "completed")
+
+    # Notificar cliente y trabajador
+    send_safe(client_id, f"{Icons.SUCCESS} El profesional finalizó el servicio ✅")
+    send_safe(chat_id, f"{Icons.SUCCESS} Servicio finalizado. Gracias por tu trabajo ✅")
