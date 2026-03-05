@@ -4,8 +4,7 @@ from models.user_state import set_state, update_data, get_data, clear_state, Use
 from models.services_data import SERVICES
 from utils.icons import Icons
 from utils.keyboards import get_alternative_times_keyboard, get_role_keyboard
-# Si ya tenés la función find_available_workers en otro lado, apuntar ahí
-from utils.worker_utils import find_available_workers
+
 # o desde models/services_data.py si es parte de ahí
 from services.request_service import create_request, update_request_status, get_request, assign_worker_to_request_safe
 from handlers.common import send_safe, edit_safe
