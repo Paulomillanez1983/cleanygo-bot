@@ -5,12 +5,12 @@ Incluye aceptación/rechazo del cliente según el precio y actualización de ses
 
 from telebot import types
 from config import bot, logger, DB_FILE
-from models.user_state import set_state, UserState, update_data
+from models.user_state import set_state, UserState
 from utils.icons import Icons
 from services.request_service import assign_worker_to_request_safe, get_request, update_request_status
 from handlers.common import send_safe, edit_safe
-import time
 from database import db_execute
+import time
 import sqlite3
 
 # ===================== PRECIOS DE SERVICIOS (nombres por default) =====================
@@ -122,15 +122,27 @@ def handle_client_accept(call):
         return
 
     # ===================== ACTUALIZAR ESTADO =====================
-    update_request_status(request_id, "accepted")  # Estado estandarizado
+    update_request_status(request_id, "accepted")
 
     # ===================== NOTIFICAR CLIENTE =====================
     edit_safe(client_id, call.message.message_id, f"{Icons.SUCCESS} Gracias, aceptaste el servicio ✅")
 
     # ===================== NOTIFICAR TRABAJADOR =====================
     worker_id = request.get("worker_chat_id")
+    if not worker_id:
+        # Intentar obtenerlo desde la sesión si no está en DB
+        worker_id = get_request(request_id).get("worker_chat_id")
+
     if worker_id:
         send_safe(worker_id, f"{Icons.SUCCESS} El cliente aceptó el servicio. ¡Podés realizarlo!")
+
+        # Actualizar sesión del trabajador
+        set_state(worker_id, UserState.JOB_IN_PROGRESS, {
+            "request_id": request_id,
+            "client_id": client_id,
+            "service_id": request["service_id"],
+            "hora": request["hora"]
+        })
 
         # REFRESCAR MENÚ DEL TRABAJADOR PARA MOSTRAR BOTÓN INICIAR SERVICIO
         worker_data = db_execute(
