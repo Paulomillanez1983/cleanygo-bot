@@ -198,13 +198,11 @@ def assign_worker_to_request(request_id: int, worker_id: int) -> Optional[Dict]:
                 logger.warning(f"[ASSIGN FAIL] request={request_id} no disponible para worker={worker_id}")
                 return None
             
-            # Actualizar current_request_id del worker
-            # ✅ AHORA (corregido):
-           cursor.execute(
-             "UPDATE workers SET current_request_id = NULL WHERE user_id = ? AND current_request_id = ?",
-             (worker_id, request_id)
-             )
-
+            # ✅ CORREGIDO: Indentación y query en una línea
+            cursor.execute(
+                "UPDATE workers SET current_request_id = ? WHERE user_id = ?",
+                (request_id, worker_id)
+            )
             conn.commit()
             
             logger.info(f"[ASSIGN] request={request_id} asignada a worker={worker_id}")
@@ -221,10 +219,9 @@ def release_worker_from_request(worker_id: int, request_id: int = None) -> bool:
             cursor = conn.cursor()
             
             if request_id:
-                # Verificar que el worker tenga esa request asignada
+                # ✅ CORREGIDO: Query completa en una línea
                 cursor.execute(
-                    "UPDATE workers SET current_request_id = NULL 
-                     WHERE user_id = ? AND current_request_id = ?",
+                    "UPDATE workers SET current_request_id = NULL WHERE user_id = ? AND current_request_id = ?",
                     (worker_id, request_id)
                 )
             else:
