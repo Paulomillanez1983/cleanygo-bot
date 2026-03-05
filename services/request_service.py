@@ -7,21 +7,21 @@ Incluye creación, consulta, actualización y asignación de trabajadores.
 import sqlite3
 import time
 import logging
+from config import DB_FILE, logger
 
+# ==================== LOGGING ====================
 logger = logging.getLogger(__name__)
-
-DB_PATH = "tu_db.sqlite3"  # Cambiá esto al path real de tu base de datos
 
 # ==================== UTILIDADES ====================
 def get_db_connection():
-    """Obtiene una conexión nueva a SQLite"""
-    conn = sqlite3.connect(DB_PATH)
+    """Obtiene una conexión nueva a SQLite usando DB_FILE de config."""
+    conn = sqlite3.connect(DB_FILE)
     conn.row_factory = sqlite3.Row
     return conn
 
 # ==================== CREAR SOLICITUD ====================
 def create_request(client_chat_id: str, service_id: str, hora: str, 
-                   lat: float, lon: float, status: str = 'searching'):
+                   lat: float, lon: float, status: str = 'pending'):
     """
     Crea una nueva solicitud y devuelve su ID real.
     Devuelve None si hubo algún error.
@@ -38,7 +38,7 @@ def create_request(client_chat_id: str, service_id: str, hora: str,
         request_id = cursor.lastrowid
         conn.close()
 
-        if request_id is None or request_id == 0:
+        if not request_id:
             logger.warning(f"[CREATE REQUEST FAIL] ID inválido para cliente={client_chat_id}")
             return None
 
@@ -56,15 +56,12 @@ def get_request(request_id: int):
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT id, client_chat_id, service_id, worker_chat_id, hora, lat, lon, status, accepted_at "
-            "FROM requests WHERE id = ?", 
+            "SELECT * FROM requests WHERE id = ?", 
             (request_id,)
         )
         row = cursor.fetchone()
         conn.close()
-        if not row:
-            return None
-        return dict(row)
+        return dict(row) if row else None
     except Exception as e:
         logger.error(f"[GET REQUEST ERROR] request_id={request_id} -> {e}")
         return None
@@ -105,7 +102,7 @@ def assign_worker_to_request(request_id: int, worker_chat_id: str):
         cursor.execute(
             """UPDATE requests
                SET worker_chat_id = ?, status = 'assigned', accepted_at = ?
-               WHERE id = ? AND status = 'waiting_acceptance'""",
+               WHERE id = ? AND status = 'pending'""",
             (str(worker_chat_id), int(time.time()), request_id)
         )
         conn.commit()
