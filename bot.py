@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-CleanyGo Bot - Entrada principal para Railway
-VERSIÓN FINAL: Webhook + handlers + requests
+CleanyGo Bot - Entrada final para Railway
+Webhook + handlers + requests
 """
 
 import os
@@ -82,21 +82,22 @@ def webhook():
     return '', 200
 
 # ==================== 8. CONFIGURAR WEBHOOK ====================
-def setup_webhook():
-    domain = os.environ.get('RAILWAY_PUBLIC_DOMAIN')
-    if not domain:
-        print("[INIT] ⚠️ RAILWAY_PUBLIC_DOMAIN no definido", file=sys.stderr)
-        return
+domain = os.environ.get('RAILWAY_PUBLIC_DOMAIN')
+if not domain:
+    logger.error("⚠️ RAILWAY_PUBLIC_DOMAIN no definido. Webhook NO configurado.")
+else:
     webhook_url = f"https://{domain}/webhook"
-    bot.remove_webhook()
-    bot.set_webhook(url=webhook_url)
-    print(f"[INIT] ✅ Webhook configurado: {webhook_url}", file=sys.stderr)
+    current = bot.get_webhook_info()
+    if current.url != webhook_url:
+        bot.remove_webhook(drop_pending_updates=True)
+        bot.set_webhook(url=webhook_url, drop_pending_updates=True)
+        logger.info(f"✅ Webhook configurado: {webhook_url}")
+    else:
+        logger.info(f"Webhook ya configurado: {webhook_url}")
 
-setup_webhook()
 print("[INIT] ✅ Bot y Flask listos para recibir webhooks", file=sys.stderr)
 
 # ==================== 9. RUN LOCAL SOLO DEBUG ====================
 if __name__ == "__main__":
-    # Solo para testing local, nunca en producción
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port, debug=True)
