@@ -324,17 +324,20 @@ def save_worker_data(chat_id: str, dni: str):
         clear_state(chat_id)
         return
 
+    # Guardar datos básicos del trabajador
     db_execute("""
         INSERT OR REPLACE INTO workers (chat_id, nombre, telefono, dni_file_id, disponible, lat, lon, last_update)
         VALUES (?, ?, ?, ?, 0, NULL, NULL, NULL)
     """, (str(chat_id), name, phone, dni), commit=True)
 
+    # Borrar servicios antiguos
     db_execute("DELETE FROM worker_services WHERE chat_id=?", (str(chat_id),), commit=True)
 
+    # Guardar servicios y precios seleccionados
     for service_id in selected_services:
         precio = float(prices.get(service_id) or 0)
         db_execute(
             "INSERT OR REPLACE INTO worker_services (chat_id, service_id, precio) VALUES (?, ?, ?)",
             (str(chat_id), service_id, precio),
             commit=True
-    )
+        )
