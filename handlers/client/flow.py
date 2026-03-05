@@ -18,7 +18,6 @@ import logging
 logger = logging.getLogger(__name__)
 
 # ==================== VARIABLE DE FLUJO ====================
-# Requerida para satisfacer: from .flow import flow
 flow = True
 
 # ==================== FLUJO CLIENTE ====================
@@ -142,12 +141,20 @@ def proceed_to_location(chat_id: str, message_id: int):
     delete_safe(chat_id, message_id)
     send_safe(chat_id, text, get_location_keyboard())
 
-# CORRECCIÓN CRÍTICA: Lambda seguro que no crashea si no hay sesión
+# ✅ CORREGIDO: Maneja tanto dict como objeto
 def _is_client_sharing_location(message):
     """Función segura para verificar si el cliente está compartiendo ubicación"""
     try:
         session = get_session(message.chat.id)
-        return session is not None and session.state == UserState.CLIENT_SHARING_LOCATION
+        if session is None:
+            return False
+        
+        # Manejar tanto dict como objeto con atributo .state
+        if isinstance(session, dict):
+            return session.get("state") == UserState.CLIENT_SHARING_LOCATION
+        else:
+            return getattr(session, "state", None) == UserState.CLIENT_SHARING_LOCATION
+            
     except Exception as e:
         logger.error(f"Error en _is_client_sharing_location: {e}")
         return False
@@ -156,7 +163,6 @@ def _is_client_sharing_location(message):
 def handle_client_location(message):
     """
     Handler para ubicación del cliente.
-    Solo se ejecuta si _is_client_sharing_location retorna True.
     """
     try:
         chat_id = message.chat.id
@@ -171,7 +177,7 @@ def handle_client_location(message):
         time_str = get_data(chat_id, "selected_time")
         period = get_data(chat_id, "time_period")
         
-        # IMPORTANTE: Eliminar teclado de ubicación primero
+        # Eliminar teclado de ubicación primero
         remove_keyboard(chat_id, "📍 Ubicación recibida")
         
         confirmation_text = f"""
@@ -190,4 +196,4 @@ def handle_client_location(message):
         
     except Exception as e:
         logger.error(f"[CLIENT LOCATION] Error: {e}")
-        send_safe(chat_id, f"{Icons.ERROR} Error al procesar ubicación. Intentá de nuevo.")
+        send_safe(message.chat.id, f"{Icons.ERROR} Error al procesar ubicación. Intentá de nuevo.")
