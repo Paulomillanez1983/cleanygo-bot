@@ -141,59 +141,83 @@ def proceed_to_location(chat_id: str, message_id: int):
     delete_safe(chat_id, message_id)
     send_safe(chat_id, text, get_location_keyboard())
 
-# ✅ CORREGIDO: Maneja tanto dict como objeto
+# ✅ CORREGIDO: Verifica que el estado sea CLIENT_SHARING_LOCATION específicamente
 def _is_client_sharing_location(message):
-    """Función segura para verificar si el cliente está compartiendo ubicación"""
+    """
+    Verifica si el usuario está en estado de compartir ubicación.
+    CRÍTICO: Debe detectar específicamente CLIENT_SHARING_LOCATION.
+    """
     try:
-        session = get_session(message.chat.id)
-        if session is None:
+        chat_id = str(message.chat.id)
+        session = get_session(chat_id)
+        
+        # get_session SIEMPRE retorna un dict, nunca None
+        # Cuando no existe, retorna {"state": "idle", "data": {}}
+        if not session:
+            logger.debug(f"[LOCATION CHECK] No session para {chat_id}")
             return False
         
-        # Manejar tanto dict como objeto con atributo .state
-        if isinstance(session, dict):
-            return session.get("state") == UserState.CLIENT_SHARING_LOCATION
-        else:
-            return getattr(session, "state", None) == UserState.CLIENT_SHARING_LOCATION
+        current_state = session.get("state", "idle")
+        target_state = UserState.CLIENT_SHARING_LOCATION.value
+        
+        is_match = current_state == target_state
+        
+        logger.info(f"[LOCATION CHECK] chat_id={chat_id}, current={current_state}, target={target_state}, match={is_match}")
+        
+        return is_match
             
     except Exception as e:
-        logger.error(f"Error en _is_client_sharing_location: {e}")
+        logger.error(f"[LOCATION CHECK] Error: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 @bot.message_handler(content_types=['location'], func=_is_client_sharing_location)
 def handle_client_location(message):
     """
     Handler para ubicación del cliente.
+    Procesa la ubicación y muestra pantalla de confirmación.
     """
+    chat_id = str(message.chat.id)
+    
     try:
-        chat_id = message.chat.id
         lat = message.location.latitude
         lon = message.location.longitude
         
         logger.info(f"[CLIENT LOCATION] Recibida de chat_id={chat_id}: lat={lat}, lon={lon}")
         
+        # Guardar datos de ubicación
         update_data(chat_id, lat=lat, lon=lon, location_shared=True)
         
+        # Recuperar datos del flujo
         service_id = get_data(chat_id, "service_id")
         time_str = get_data(chat_id, "selected_time")
         period = get_data(chat_id, "time_period")
         
-        # Eliminar teclado de ubicación primero
+        logger.info(f"[CLIENT LOCATION] Datos: service={service_id}, time={time_str} {period}")
+        
+        # Eliminar teclado de ubicación
         remove_keyboard(chat_id, "📍 Ubicación recibida")
         
+        # ✅ CAMBIAR ESTADO ANTES de enviar confirmación
+        set_state(chat_id, UserState.CLIENT_CONFIRMING)
+        
+        # Mostrar resumen final
         confirmation_text = f"""
 {Icons.CALENDAR} <b>Confirma tu solicitud</b>
 
 {get_service_display(service_id)}
 {Icons.TIME} <b>Hora:</b> {time_str} {period}
-{Icons.LOCATION} <b>Ubicación:</b> Recibida ✓
+{Icons.LOCATION} <b>Ubicación:</b> {lat:.5f}, {lon:.5f}
 
 ¿Todo correcto?
         """
         
-        set_state(chat_id, UserState.CLIENT_CONFIRMING)
         send_safe(chat_id, confirmation_text, get_confirmation_keyboard())
-        logger.info(f"[CLIENT LOCATION] Flujo completado para chat_id={chat_id}")
+        logger.info(f"[CLIENT LOCATION] Confirmación enviada a {chat_id}")
         
     except Exception as e:
-        logger.error(f"[CLIENT LOCATION] Error: {e}")
-        send_safe(message.chat.id, f"{Icons.ERROR} Error al procesar ubicación. Intentá de nuevo.")
+        logger.error(f"[CLIENT LOCATION] Error procesando ubicación: {e}")
+        import traceback
+        traceback.print_exc()
+        send_safe(chat_id, f"{Icons.ERROR} Error al procesar ubicación. Intentá de nuevo o usá /cancel.")
