@@ -1,44 +1,38 @@
 #!/usr/bin/env python3
 """
-CleanyGo Bot - Punto de entrada principal listo para Railway
+CleanyGo Bot - Entrada principal optimizada para Railway
 """
 
 import os
-import sys
 from flask import Flask, request, jsonify
 from telebot.types import Update
 
-# Inicializar base de datos
 from database import init_db
 init_db()
-
-# Importar handlers (solo registra decoradores)
-from handlers import common
-from handlers.client import flow as client_flow
-from handlers.client import search
-from handlers.client import callbacks as client_callbacks
-from handlers.worker import flow as worker_flow
-from handlers.worker import jobs
-from handlers.worker import profile
 
 from config import bot, logger
 from utils.icons import Icons
 
+# Import handlers para registrar decoradores
+import handlers.common
+import handlers.client.flow
+import handlers.client.search
+import handlers.client.callbacks
+import handlers.worker.flow
+import handlers.worker.jobs
+import handlers.worker.profile
+
 app = Flask(__name__)
 
+# ----- Healthcheck -----
 @app.route('/')
-def index():
-    """Health check simple"""
-    return '✅ CleanyGo Bot is running!', 200
-
 @app.route('/health')
 def health():
-    """Endpoint healthcheck Railway"""
     return jsonify({"status": "healthy", "bot": "CleanyGo online"}), 200
 
+# ----- Webhook endpoint -----
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    """Recibe actualizaciones de Telegram"""
     if request.headers.get('content-type') == 'application/json':
         json_string = request.get_data().decode('utf-8')
         update = Update.de_json(json_string)
@@ -46,32 +40,8 @@ def webhook():
         return '', 200
     return 'Forbidden', 403
 
-# ======================
-# SCRIPT PARA CONFIGURAR WEBHOOK
-# ======================
-def setup_webhook():
-    """Solo correr manualmente: configura el webhook con Telegram"""
-    railway_domain = os.getenv('RAILWAY_PUBLIC_DOMAIN')
-    if not railway_domain:
-        logger.error("❌ RAILWAY_PUBLIC_DOMAIN no está configurado")
-        sys.exit(1)
-
-    webhook_url = f"https://{railway_domain}/webhook"
-    current_webhook = bot.get_webhook_info()
-    if current_webhook.url == webhook_url:
-        logger.info(f"Webhook ya configurado: {webhook_url}")
-        return webhook_url
-
-    bot.remove_webhook(drop_pending_updates=True)
-    bot.set_webhook(url=webhook_url, drop_pending_updates=True)
-    logger.info(f"✅ Webhook configurado: {webhook_url}")
-    return webhook_url
-
-# ======================
-# EJECUCIÓN LOCAL SOLO
-# ======================
+# ----- SOLO EJECUCIÓN LOCAL -----
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
-    logger.info(f"{Icons.SUCCESS} Iniciando CleanyGo en puerto {port}")
-    setup_webhook()  # solo en local
+    logger.info(f"{Icons.SUCCESS} Iniciando CleanyGo localmente en puerto {port}")
     app.run(host="0.0.0.0", port=port)
