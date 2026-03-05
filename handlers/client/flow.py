@@ -1,6 +1,6 @@
 # handlers/client/flow.py
 """
-Flujo completo para clientes - Solicitud de servicios.
+Flujo completo para clientes - Solicitud de servicios (UX optimizada).
 """
 
 from config import bot
@@ -17,14 +17,13 @@ import logging
 
 # Importar precios y funciones de jobs
 from handlers.worker import jobs as worker_jobs
-from services import request_service  # <-- request_service seguro con create_request y assign_worker_to_request_safe
+from services import request_service
 
 logger = logging.getLogger(__name__)
 
-# ==================== VARIABLE DE FLUJO ====================
 flow = True
 
-# ==================== FUNCIONES AUXILIARES CRÍTICAS ====================
+# ==================== FUNCIONES AUXILIARES ====================
 
 def debug_session(chat_id: str, label: str):
     try:
@@ -48,13 +47,21 @@ def get_flow_data(chat_id: str, key: str, default=None):
     chat_id = str(chat_id)
     try:
         result = get_data(chat_id, key)
-        logger.info(f"[GET] chat_id={chat_id}, key={key}, result={result}")
         return result if result is not None else default
     except Exception as e:
         logger.error(f"[GET] ERROR chat_id={chat_id}, key={key}: {e}")
         return default
 
-# ==================== FLUJO CLIENTE ====================
+def get_service_display(service_id: str, with_price: bool = False) -> str:
+    """Devuelve nombre y precio opcional del servicio"""
+    svc = SERVICES.get(service_id, {})
+    text = f"{svc.get('icon', '🔹')} <b>{svc.get('name', service_id)}</b>"
+    if with_price:
+        price = worker_jobs.SERVICES_PRICES.get(service_id, {}).get("price", 0)
+        text += f"\n   <code>${price}</code>"
+    return text
+
+# ==================== FLUJO INICIAL ====================
 
 @bot.message_handler(func=lambda m: m.text and ("Necesito" in m.text or "servicio" in m.text.lower()))
 def handle_client_start(message):
@@ -65,7 +72,7 @@ def start_client_flow(chat_id: str):
     from models.user_state import clear_state
     clear_state(chat_id)
     save_state_and_data(chat_id, UserState.CLIENT_SELECTING_SERVICE, {})
-    
+
     text = f"{Icons.SEARCH} <b>¿Qué servicio necesitás?</b>\n\nSeleccioná una opción:"
     markup = types.InlineKeyboardMarkup(row_width=1)
     for svc_id, svc in SERVICES.items():
@@ -80,24 +87,14 @@ def start_client_flow(chat_id: str):
 def handle_client_service_selection(call):
     chat_id = str(call.message.chat.id)
     service_id = call.data.split(":")[1]
-    
+
     update_data(chat_id, service_id=service_id, service_name=SERVICES[service_id]["name"])
     set_state(chat_id, UserState.CLIENT_SELECTING_TIME)
     debug_session(chat_id, "POST_SERVICE")
-    
-    bot.answer_callback_query(call.id, f"Seleccionaste: {SERVICES[service_id]['name']}")
-    
-    text = f"{Icons.CLOCK} <b>¿Para qué hora lo necesitás?</b>\n\nServicio: {get_service_display(service_id)}\n<b>Opciones rápidas:</b>"
-    edit_safe(chat_id, call.message.message_id, text, get_time_selector())
 
-def get_service_display(service_id: str, with_price: bool = False) -> str:
-    """Devuelve nombre y precio opcional del servicio"""
-    svc = SERVICES.get(service_id, {})
-    text = f"{svc.get('icon', '🔹')} <b>{svc.get('name', service_id)}</b>"
-    if with_price:
-        price = worker_jobs.SERVICES_PRICES.get(service_id, {}).get("price", 0)
-        text += f"\n   <code>${price}</code>"
-    return text
+    bot.answer_callback_query(call.id, f"Seleccionaste: {SERVICES[service_id]['name']}")
+    text = f"{Icons.CLOCK} <b>¿Para qué hora lo necesitás?</b>\nServicio: {get_service_display(service_id)}\n<b>Opciones rápidas:</b>"
+    edit_safe(chat_id, call.message.message_id, text, get_time_selector())
 
 # ==================== HANDLERS DE TIEMPO ====================
 
@@ -146,14 +143,14 @@ def proceed_to_location(chat_id: str, message_id: int):
     service_id = get_data(chat_id, "service_id")
     time_str = get_data(chat_id, "selected_time")
     period = get_data(chat_id, "time_period")
-    
+
     if not service_id:
         send_safe(chat_id, f"{Icons.ERROR} Error: sesión expirada. Usá /start de nuevo.")
         return
-    
+
     set_state(chat_id, UserState.CLIENT_SHARING_LOCATION)
-    
-    text = f"""
+
+    summary_text = f"""
 {Icons.LOCATION} <b>Último paso: Ubicación</b>
 
 📋 <b>Resumen de tu solicitud:</b>
@@ -163,7 +160,7 @@ def proceed_to_location(chat_id: str, message_id: int):
 {Icons.INFO} Enviá tu ubicación para encontrar profesionales cercanos:
 """
     delete_safe(chat_id, message_id)
-    send_safe(chat_id, text, get_location_keyboard())
+    send_safe(chat_id, summary_text, get_location_keyboard())
 
 def _is_client_sharing_location(message):
     chat_id = str(message.chat.id)
@@ -177,14 +174,13 @@ def handle_client_location(message):
     service_id = get_data(chat_id, "service_id")
     time_str = get_data(chat_id, "selected_time")
     period = get_data(chat_id, "time_period")
-    
+
     update_data(chat_id, lat=lat, lon=lon, location_shared=True)
     remove_keyboard(chat_id, "📍 Ubicación recibida")
     set_state(chat_id, UserState.CLIENT_CONFIRMING)
-    
-    # Obtener precio
+
     service_info = worker_jobs.SERVICES_PRICES.get(service_id, {"name": service_id, "price": 0})
-    
+
     confirmation_text = f"""
 {Icons.CALENDAR} <b>Confirma tu solicitud</b>
 
@@ -192,8 +188,6 @@ Servicio: {service_info['name']}
 {Icons.MONEY} <b>Precio:</b> ${service_info['price']}
 {Icons.TIME} <b>Hora:</b> {time_str} {period}
 {Icons.LOCATION} <b>Ubicación:</b> {lat:.5f}, {lon:.5f}
-
-¿Todo correcto?
 """
     send_safe(chat_id, confirmation_text, get_confirmation_keyboard())
     logger.info(f"[LOCATION] Confirmación enviada")
@@ -203,19 +197,16 @@ Servicio: {service_info['name']}
 @bot.callback_query_handler(func=lambda c: c.data == "confirm_yes_client")
 def handle_client_confirmation(call):
     chat_id = str(call.message.chat.id)
-    
     service_id = get_data(chat_id, "service_id")
     time_str = get_data(chat_id, "selected_time")
     period = get_data(chat_id, "time_period")
     lat = get_data(chat_id, "lat")
     lon = get_data(chat_id, "lon")
-    
     hora_completa = f"{time_str} {period}"
-    
-    # Verificar si ya existe request_id
+
+    # Crear request si no existe
     session = get_session(chat_id)
     request_id = session.get("data", {}).get("request_id")
-    
     if not request_id:
         request_id = request_service.create_request(
             client_chat_id=chat_id,
@@ -229,17 +220,18 @@ def handle_client_confirmation(call):
             bot.answer_callback_query(call.id, "❌ Error al crear la solicitud, intentá de nuevo")
             return
         update_data(chat_id, request_id=request_id)
-    
-    # Cambiar estado a esperando aceptación
+
+    # Cambiar estado
     set_state(chat_id, UserState.CLIENT_WAITING_ACCEPTANCE, {"request_id": request_id})
-    
     bot.answer_callback_query(call.id, "¡Solicitud enviada! Buscando profesionales cercanos...")
-    
-    # Mensaje de búsqueda
+
+    # Mensaje de búsqueda optimizado
     search_text = f"""
 {Icons.SEARCH} <b>Buscando profesionales disponibles...</b>
 
-{Icons.PENDING} Verificando disponibilidad para {worker_jobs.SERVICES_PRICES.get(service_id, {}).get('name', service_id)} a las {hora_completa}
+Servicio: {worker_jobs.SERVICES_PRICES.get(service_id, {}).get('name', service_id)}
+Hora: {hora_completa}
+Ubicación recibida ✅
 
 {Icons.TIME} Esto puede tardar unos segundos...
 """
