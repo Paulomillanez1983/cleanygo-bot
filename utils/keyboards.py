@@ -1,6 +1,6 @@
 from telebot import types
 from utils.icons import Icons
-from models.services_data import SERVICES
+from handlers.worker_service import find_available_workers
 
 def get_role_keyboard():
     """Teclado de selección de rol con descripciones"""
