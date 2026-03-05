@@ -1,9 +1,10 @@
 """
 Handlers para gestión de trabajos/asignaciones para profesionales.
+Versión corregida para reflejar el precio real del trabajador.
 """
 
 from telebot import types
-from config import bot, logger
+from config import bot, logger, DB_FILE
 from models.user_state import set_state, UserState
 from utils.icons import Icons
 from utils.keyboards import get_job_response_keyboard
@@ -12,9 +13,8 @@ from handlers.common import send_safe, edit_safe
 import time
 from database import db_execute
 import sqlite3
-from config import DB_FILE
 
-# ===================== PRECIOS DE SERVICIOS =====================
+# ===================== PRECIOS DE SERVICIOS (nombres por default) =====================
 SERVICES_PRICES = {
     "ninaera": {"name": "Niñera", "price": 1500},
     "limpieza": {"name": "Limpieza", "price": 2000},
@@ -37,7 +37,7 @@ def init_request_rejections_table():
         conn.commit()
     logger.info("✅ Tabla request_rejections inicializada")
 
-# Ejecutar inicialización al cargar el handler
+# Inicializar tabla al cargar el handler
 init_request_rejections_table()
 
 # ===================== HANDLERS =====================
@@ -57,7 +57,6 @@ def handle_job_accept(call):
                   f"{Icons.ERROR} <b>Trabajo no disponible</b>\n\nNo se encontró la solicitud.")
         return
     
-    # ✅ FIX: permitir status que pueden ser asignables
     if request["status"] not in ('pending', 'searching', 'waiting_acceptance'):
         logger.warning(f"[JOB_ACCEPT] request_id={request_id} status={request['status']} ya asignado")
         bot.answer_callback_query(call.id, "❌ Este trabajo ya fue tomado por otro profesional")
@@ -91,13 +90,22 @@ def handle_job_accept(call):
     service_id = request["service_id"]
     hora = request["hora"]
     
-    service_info = SERVICES_PRICES.get(service_id, {"name": service_id.capitalize(), "price": 0})
+    # Obtener el precio real que puso el trabajador
+    worker_price_info = db_execute(
+        "SELECT precio FROM worker_services WHERE chat_id = ? AND service_id = ?",
+        (chat_id, service_id),
+        fetch_one=True
+    )
+    price = worker_price_info[0] if worker_price_info else 0
+    
+    # Nombre del servicio
+    service_name = SERVICES_PRICES.get(service_id, {"name": service_id.capitalize()})["name"]
     
     client_text = f"""
 {Icons.PARTY} <b>¡Encontramos tu profesional!</b>
 
-Servicio: {service_info['name']}
-{Icons.MONEY} <b>Precio:</b> ${service_info['price']}
+Servicio: {service_name}
+{Icons.MONEY} <b>Precio:</b> ${price}
 {Icons.TIME} <b>Hora:</b> {hora}
 
 {Icons.INFO} El profesional se pondrá en contacto con vos pronto.
