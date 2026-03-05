@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 CleanyGo Bot - Entrada principal para Railway
-VERSIÓN OPTIMIZADA: Webhook + handlers + requests
+VERSIÓN FINAL: Webhook + handlers + requests
 """
 
 import os
@@ -94,7 +94,9 @@ def setup_webhook():
 
 setup_webhook()
 print("[INIT] ✅ Bot y Flask listos para recibir webhooks", file=sys.stderr)
-# ==================== 9. RUN LOCAL ====================
+
+# ==================== 9. RUN LOCAL SOLO DEBUG ====================
 if __name__ == "__main__":
+    # Solo para testing local, nunca en producción
     port = int(os.environ.get("PORT", 8080))
-    app.run(host="0.0.0.0", port=port, debug=False)
+    app.run(host="0.0.0.0", port=port, debug=True)
