@@ -1,7 +1,7 @@
 """
 Módulo para manejo de solicitudes (requests) en la base de datos.
 Incluye creación, consulta, actualización y asignación de trabajadores.
-Versión final corregida para concurrencia segura al asignar trabajos.
+Versión final corregida y segura para concurrencia en asignación de trabajos.
 """
 
 import sqlite3
