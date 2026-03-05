@@ -1,78 +1,112 @@
-from database import db_execute
+import sqlite3
 import time
 import logging
 
 logger = logging.getLogger(__name__)
 
+DB_PATH = "tu_db.sqlite3"  # Cambiá esto al path real de tu base de datos
+
+# ==================== UTILIDADES ====================
+def get_db_connection():
+    """Obtiene una conexión nueva a SQLite"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
 # ==================== CREAR SOLICITUD ====================
 def create_request(client_chat_id: str, service_id: str, hora: str, 
                    lat: float, lon: float, status: str = 'searching'):
-    """Crea una nueva solicitud y devuelve su ID"""
+    """
+    Crea una nueva solicitud y devuelve su ID real.
+    Devuelve None si hubo algún error.
+    """
     try:
-        result = db_execute(
-            """INSERT INTO requests (client_chat_id, service_id, hora, lat, lon, status) 
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """INSERT INTO requests (client_chat_id, service_id, hora, lat, lon, status)
                VALUES (?, ?, ?, ?, ?, ?)""",
-            (str(client_chat_id), service_id, hora, lat, lon, status),
-            commit=True
+            (str(client_chat_id), service_id, hora, lat, lon, status)
         )
-        if result is not None:
-            last_id = db_execute("SELECT last_insert_rowid()", fetch_one=True)[0]
-            logger.info(f"[CREATE REQUEST] ID={last_id} cliente={client_chat_id}, servicio={service_id}")
-            return last_id
-        return None
+        conn.commit()
+        request_id = cursor.lastrowid
+        conn.close()
+
+        if request_id is None or request_id == 0:
+            logger.warning(f"[CREATE REQUEST FAIL] ID inválido para cliente={client_chat_id}")
+            return None
+
+        logger.info(f"[CREATE REQUEST] ID={request_id} cliente={client_chat_id}, servicio={service_id}")
+        return request_id
+
     except Exception as e:
         logger.error(f"[CREATE REQUEST ERROR] cliente={client_chat_id}, servicio={service_id} -> {e}")
         return None
 
-
 # ==================== OBTENER SOLICITUD ====================
 def get_request(request_id: int):
-    """Obtiene una solicitud por ID"""
+    """Obtiene una solicitud por ID y devuelve un diccionario"""
     try:
-        req = db_execute(
-            "SELECT * FROM requests WHERE id = ?", 
-            (request_id,), 
-            fetch_one=True
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, client_chat_id, service_id, worker_chat_id, hora, lat, lon, status, accepted_at "
+            "FROM requests WHERE id = ?", 
+            (request_id,)
         )
-        return req
+        row = cursor.fetchone()
+        conn.close()
+        if not row:
+            return None
+        return dict(row)
     except Exception as e:
         logger.error(f"[GET REQUEST ERROR] request_id={request_id} -> {e}")
         return None
 
-
 # ==================== ACTUALIZAR ESTADO ====================
 def update_request_status(request_id: int, status: str, worker_chat_id: str = None):
-    """Actualiza estado de una solicitud"""
+    """Actualiza el estado de una solicitud"""
     try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
         if worker_chat_id:
-            return db_execute(
-                """UPDATE requests SET status = ?, worker_chat_id = ?, accepted_at = ? 
+            cursor.execute(
+                """UPDATE requests SET status = ?, worker_chat_id = ?, accepted_at = ?
                    WHERE id = ?""",
-                (status, str(worker_chat_id), int(time.time()), request_id),
-                commit=True
+                (status, str(worker_chat_id), int(time.time()), request_id)
             )
-        return db_execute(
-            "UPDATE requests SET status = ? WHERE id = ?",
-            (status, request_id),
-            commit=True
-        )
+        else:
+            cursor.execute(
+                "UPDATE requests SET status = ? WHERE id = ?",
+                (status, request_id)
+            )
+        conn.commit()
+        conn.close()
+        return True
     except Exception as e:
         logger.error(f"[UPDATE REQUEST ERROR] request_id={request_id}, status={status}, worker={worker_chat_id} -> {e}")
-        return None
-
+        return False
 
 # ==================== ASIGNAR TRABAJADOR ====================
 def assign_worker_to_request(request_id: int, worker_chat_id: str):
-    """Asigna un trabajador a una solicitud SOLO si sigue disponible"""
+    """
+    Asigna un trabajador a una solicitud SOLO si sigue disponible.
+    Devuelve True si se asignó, False si ya fue tomada.
+    """
     try:
-        rows_updated = db_execute(
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
             """UPDATE requests
                SET worker_chat_id = ?, status = 'assigned', accepted_at = ?
                WHERE id = ? AND status = 'waiting_acceptance'""",
-            (str(worker_chat_id), int(time.time()), request_id),
-            commit=True
+            (str(worker_chat_id), int(time.time()), request_id)
         )
-        if rows_updated and rows_updated > 0:
+        conn.commit()
+        rows_updated = cursor.rowcount
+        conn.close()
+
+        if rows_updated > 0:
             logger.info(f"[ASSIGN REQUEST] request_id={request_id} asignada a worker={worker_chat_id}")
             return True
         else:
@@ -82,8 +116,7 @@ def assign_worker_to_request(request_id: int, worker_chat_id: str):
         logger.error(f"[ASSIGN REQUEST ERROR] request_id={request_id}, worker={worker_chat_id} -> {e}")
         return False
 
-
-# ==================== FUNCIÓN SEGURA PARA FLUJOS ====================
+# ==================== FUNCIÓN SEGURA PARA CALLBACKS ====================
 def assign_worker_to_request_safe(request_id: int, worker_chat_id: str):
     """
     Versión segura para usar en callbacks de Telegram.
