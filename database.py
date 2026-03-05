@@ -81,7 +81,11 @@ def init_db():
         
         conn.commit()
     logger.info(f"{Icons.SUCCESS} Base de datos inicializada")
-
+with sqlite3.connect(DB_FILE) as conn:
+    cursor = conn.cursor()
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+    tables = cursor.fetchall()
+    logger.info(f"Tablas creadas: {tables}")
 # ==================== EJECUTAR CONSULTAS ====================
 def db_execute(query, params=(), fetch_one=False, commit=False):
     try:
