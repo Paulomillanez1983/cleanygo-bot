@@ -81,11 +81,9 @@ def webhook():
         logger.error(f"[WEBHOOK ERROR] {e}")
     return '', 200
 
-# ==================== 8. CONFIGURAR WEBHOOK ====================
+# ==================== 8. CONFIGURAR WEBHOOK (PROD) ====================
 domain = os.environ.get('RAILWAY_PUBLIC_DOMAIN')
-if not domain:
-    logger.error("⚠️ RAILWAY_PUBLIC_DOMAIN no definido. Webhook NO configurado.")
-else:
+if domain:
     webhook_url = f"https://{domain}/webhook"
     current = bot.get_webhook_info()
     if current.url != webhook_url:
@@ -94,6 +92,8 @@ else:
         logger.info(f"✅ Webhook configurado: {webhook_url}")
     else:
         logger.info(f"Webhook ya configurado: {webhook_url}")
+else:
+    logger.error("⚠️ RAILWAY_PUBLIC_DOMAIN no definido. Webhook NO configurado.")
 
 print("[INIT] ✅ Bot y Flask listos para recibir webhooks", file=sys.stderr)
 
