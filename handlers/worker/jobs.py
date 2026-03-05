@@ -11,18 +11,36 @@ from services.request_service import assign_worker_to_request_safe, get_request,
 from handlers.common import send_safe, edit_safe
 import time
 from database import db_execute
+import sqlite3
+from config import DB_FILE
 
 # ===================== PRECIOS DE SERVICIOS =====================
-# Ajustar según los servicios que tengas
 SERVICES_PRICES = {
     "ninaera": {"name": "Niñera", "price": 1500},
     "limpieza": {"name": "Limpieza", "price": 2000},
     "plomeria": {"name": "Plomería", "price": 2500},
-    # Agregar más servicios aquí
 }
 
-# ===================== HANDLERS =====================
+# ===================== CREAR TABLA RECHAZOS =====================
+def init_request_rejections_table():
+    """Crea tabla request_rejections si no existe"""
+    with sqlite3.connect(DB_FILE) as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS request_rejections (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                request_id INTEGER NOT NULL,
+                worker_chat_id TEXT NOT NULL,
+                created_at INTEGER NOT NULL
+            )
+        ''')
+        conn.commit()
+    logger.info("✅ Tabla request_rejections inicializada")
 
+# Ejecutar inicialización al cargar el handler
+init_request_rejections_table()
+
+# ===================== HANDLERS =====================
 @bot.callback_query_handler(func=lambda c: c.data.startswith("job_accept:"))
 def handle_job_accept(call):
     chat_id = call.message.chat.id
@@ -39,7 +57,8 @@ def handle_job_accept(call):
                   f"{Icons.ERROR} <b>Trabajo no disponible</b>\n\nNo se encontró la solicitud.")
         return
     
-    if request["status"] != 'waiting_acceptance':
+    # ✅ FIX: permitir status que pueden ser asignables
+    if request["status"] not in ('pending', 'searching', 'waiting_acceptance'):
         logger.warning(f"[JOB_ACCEPT] request_id={request_id} status={request['status']} ya asignado")
         bot.answer_callback_query(call.id, "❌ Este trabajo ya fue tomado por otro profesional")
         edit_safe(chat_id, call.message.message_id, 
@@ -115,7 +134,7 @@ Te seguiremos notificando de nuevas oportunidades.
     """
     edit_safe(chat_id, call.message.message_id, text)
     
-    # Opcional: marcar en DB que el worker rechazó
+    # Guardar el rechazo en DB
     try:
         db_execute(
             "INSERT INTO request_rejections (request_id, worker_chat_id, created_at) VALUES (?, ?, ?)",
