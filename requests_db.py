@@ -199,10 +199,12 @@ def assign_worker_to_request(request_id: int, worker_id: int) -> Optional[Dict]:
                 return None
             
             # Actualizar current_request_id del worker
-            cursor.execute(
-                "UPDATE workers SET current_request_id = ? WHERE user_id = ?",
-                (request_id, worker_id)
-            )
+            # ✅ AHORA (corregido):
+           cursor.execute(
+             "UPDATE workers SET current_request_id = NULL WHERE user_id = ? AND current_request_id = ?",
+             (worker_id, request_id)
+             )
+
             conn.commit()
             
             logger.info(f"[ASSIGN] request={request_id} asignada a worker={worker_id}")
