@@ -5,10 +5,9 @@ Handlers para gestión de trabajos/asignaciones para profesionales.
 from telebot import types
 from config import bot, logger
 from models.user_state import set_state, UserState
-from models.services_data import SERVICES
 from utils.icons import Icons
 from utils.keyboards import get_job_response_keyboard
-from services.request_service import assign_worker_to_request
+from services.request_service import assign_worker_to_request_safe, get_request, update_request_status
 from handlers.common import send_safe, edit_safe
 import time
 from database import db_execute
@@ -22,65 +21,6 @@ SERVICES_PRICES = {
     # Agregar más servicios aquí
 }
 
-# ===================== UTILS =====================
-
-def get_request(request_id: int):
-    """Obtiene una solicitud por ID y devuelve un diccionario"""
-    row = db_execute(
-        "SELECT id, client_chat_id, service_id, worker_chat_id, hora, lat, lon, status, accepted_at "
-        "FROM requests WHERE id = ?", 
-        (request_id,), 
-        fetch_one=True
-    )
-    if not row:
-        return None
-    keys = ["id", "client_chat_id", "service_id", "worker_chat_id", 
-            "hora", "lat", "lon", "status", "accepted_at"]
-    return dict(zip(keys, row))
-
-
-def create_request(client_chat_id: str, service_id: str, hora: str, 
-                   lat: float, lon: float, status: str = 'waiting_acceptance'):
-    """Crea una nueva solicitud"""
-    result = db_execute(
-        """INSERT INTO requests (client_chat_id, service_id, hora, lat, lon, status) 
-           VALUES (?, ?, ?, ?, ?, ?)""",
-        (str(client_chat_id), service_id, hora, lat, lon, status),
-        commit=True
-    )
-    
-    if result is not None:
-        return db_execute("SELECT last_insert_rowid()", fetch_one=True)[0]
-    return None
-
-
-def update_request_status(request_id: int, status: str, worker_chat_id: str = None):
-    """Actualiza estado de una solicitud"""
-    if worker_chat_id:
-        return db_execute(
-            """UPDATE requests SET status = ?, worker_chat_id = ?, accepted_at = ? 
-               WHERE id = ?""",
-            (status, str(worker_chat_id), int(time.time()), request_id),
-            commit=True
-        )
-    return db_execute(
-        "UPDATE requests SET status = ? WHERE id = ?",
-        (status, request_id),
-        commit=True
-    )
-
-
-def assign_worker_to_request_safe(request_id: int, worker_chat_id: str):
-    """Asigna un trabajador a una solicitud SOLO si sigue disponible"""
-    return db_execute(
-        """UPDATE requests
-           SET worker_chat_id = ?, status = 'assigned', accepted_at = ?
-           WHERE id = ? AND status = 'waiting_acceptance'""",
-        (str(worker_chat_id), int(time.time()), request_id),
-        commit=True
-    )
-
-
 # ===================== HANDLERS =====================
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("job_accept:"))
@@ -88,21 +28,33 @@ def handle_job_accept(call):
     chat_id = call.message.chat.id
     request_id = int(call.data.split(":")[1])
     
+    logger.info(f"[JOB_ACCEPT] worker={chat_id} intenta aceptar request_id={request_id}")
+    
     request = get_request(request_id)
     
     if not request:
+        logger.warning(f"[JOB_ACCEPT] request_id={request_id} no encontrado")
         bot.answer_callback_query(call.id, "❌ Este trabajo no existe")
         edit_safe(chat_id, call.message.message_id, 
                   f"{Icons.ERROR} <b>Trabajo no disponible</b>\n\nNo se encontró la solicitud.")
         return
     
     if request["status"] != 'waiting_acceptance':
+        logger.warning(f"[JOB_ACCEPT] request_id={request_id} status={request['status']} ya asignado")
         bot.answer_callback_query(call.id, "❌ Este trabajo ya fue tomado por otro profesional")
         edit_safe(chat_id, call.message.message_id, 
                   f"{Icons.ERROR} <b>Trabajo no disponible</b>\n\nYa fue asignado a otro profesional.")
         return
     
-    assign_worker_to_request_safe(request_id, chat_id)
+    # Intentar asignar de forma segura
+    updated = assign_worker_to_request_safe(request_id, chat_id)
+    if not updated:
+        logger.warning(f"[JOB_ACCEPT] request_id={request_id} fallo al asignar a worker={chat_id}")
+        bot.answer_callback_query(call.id, "❌ No se pudo asignar el trabajo")
+        edit_safe(chat_id, call.message.message_id, 
+                  f"{Icons.ERROR} <b>Trabajo no disponible</b>\n\nOtro profesional lo tomó primero.")
+        return
+    
     bot.answer_callback_query(call.id, "✅ ¡Trabajo asignado!")
     
     # Mensaje al trabajador
@@ -120,10 +72,7 @@ def handle_job_accept(call):
     service_id = request["service_id"]
     hora = request["hora"]
     
-    # Obtener nombre bonito y precio
     service_info = SERVICES_PRICES.get(service_id, {"name": service_id.capitalize(), "price": 0})
-    
-    from handlers.client.flow import get_service_display
     
     client_text = f"""
 {Icons.PARTY} <b>¡Encontramos tu profesional!</b>
@@ -146,12 +95,16 @@ Servicio: {service_info['name']}
     )
     
     send_safe(client_id, client_text, markup)
+    
+    logger.info(f"[JOB_ACCEPT] request_id={request_id} asignado correctamente a worker={chat_id}")
 
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("job_reject:"))
 def handle_job_reject(call):
     chat_id = call.message.chat.id
     request_id = int(call.data.split(":")[1])
+    
+    logger.info(f"[JOB_REJECT] worker={chat_id} rechazó request_id={request_id}")
     
     bot.answer_callback_query(call.id, "Trabajo rechazado")
     
@@ -161,3 +114,14 @@ def handle_job_reject(call):
 Te seguiremos notificando de nuevas oportunidades.
     """
     edit_safe(chat_id, call.message.message_id, text)
+    
+    # Opcional: marcar en DB que el worker rechazó
+    try:
+        db_execute(
+            "INSERT INTO request_rejections (request_id, worker_chat_id, created_at) VALUES (?, ?, ?)",
+            (request_id, chat_id, int(time.time())),
+            commit=True
+        )
+        logger.info(f"[JOB_REJECT] registro rechazo guardado request_id={request_id}, worker={chat_id}")
+    except Exception as e:
+        logger.error(f"[JOB_REJECT] error guardando rechazo request_id={request_id}, worker={chat_id}: {e}")
