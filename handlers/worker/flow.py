@@ -162,6 +162,7 @@ def handle_service_confirm(call):
 def ask_next_price(chat_id: str):
     services = get_data(chat_id, "services_to_price", [])
     idx = get_data(chat_id, "current_service_idx", 0)
+    prices = get_data(chat_id, "prices", {})
 
     if idx >= len(services):
         set_state(chat_id, "WORKER_ENTERING_NAME")
@@ -170,11 +171,20 @@ def ask_next_price(chat_id: str):
 
     service_id = services[idx]
     service_name = SERVICES.get(service_id, {}).get("name", service_id)
-    text = f"{Icons.MONEY} <b>Precio para {service_name} ({idx+1}/{len(services)})</b>\nIngresá tarifa por hora (solo números)"
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    current_price = prices.get(service_id)
+    current_price_text = f" (actual: ${current_price})" if current_price is not None else ""
+
+    text = (
+        f"{Icons.MONEY} <b>Precio para {service_name} ({idx+1}/{len(services)}){current_price_text}</b>\n"
+        f"Ingresá tarifa por hora (solo números).\n"
+        f"Podés presionar ⏭️ para saltar o ❌ para cancelar."
+    )
+
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     markup.add("⏭️ Saltar")
     markup.add("❌ Cancelar")
     bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
+
 
 @bot.message_handler(func=lambda m: get_session(m.chat.id)["state"] == "WORKER_ENTERING_PRICE")
 def handle_price_input(message):
@@ -187,17 +197,28 @@ def handle_price_input(message):
     if text == "❌ Cancelar":
         cancel_flow(chat_id)
         return
+
+    service_id = services[idx]
+    service_name = SERVICES.get(service_id, {}).get("name", service_id)
+
     if text == "⏭️ Saltar":
-        prices[services[idx]] = None
+        prices[service_id] = None
         update_data(chat_id, prices=prices, current_service_idx=idx+1)
+        bot.send_message(chat_id, f"⚡ Precio para {service_name} omitido.")
         ask_next_price(chat_id)
         return
+
     if not text.isdigit():
         bot.send_message(chat_id, "❌ Ingresá solo números.")
         return
 
     price = int(text)
-    prices[services[idx]] = price
+    # Validación de rango
+    if price <= 0 or price > 10000:
+        bot.send_message(chat_id, "❌ Precio inválido. Ingresá un número entre 1 y 10.000.")
+        return
+
+    prices[service_id] = price
     update_data(chat_id, prices=prices, current_service_idx=idx+1)
     bot.send_message(chat_id, f"✅ Precio guardado: ${price}/hora")
     ask_next_price(chat_id)
