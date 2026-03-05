@@ -1,9 +1,10 @@
 """
 Flujo completo para clientes - Solicitud de servicios (UX optimizada)
 con asignación automática a trabajadores, confirmación bidireccional y menú funcional.
+VERSIÓN CORREGIDA: Integración con requests_db.py y notificaciones automáticas
 """
 
-from config import bot
+from config import bot, notify_client
 from models.user_state import set_state, update_data, get_data, UserState, get_session
 from models.services_data import SERVICES
 from utils.icons import Icons
@@ -15,9 +16,16 @@ from handlers.common import send_safe, edit_safe, delete_safe, remove_keyboard
 from telebot import types
 import logging
 
+# ✅ CORREGIDO: Importar desde requests_db en lugar de request_service
+from requests_db import (
+    create_request, 
+    assign_worker_to_request, 
+    get_request,
+    complete_request,
+    cancel_request
+)
 from handlers.worker import jobs as worker_jobs
 from handlers.worker.main import show_worker_menu
-from services import request_service
 
 logger = logging.getLogger(__name__)
 
@@ -189,31 +197,38 @@ Servicio: {service_info['name']}
 def handle_client_confirmation(call):
     chat_id = str(call.message.chat.id)
     service_id = get_data(chat_id, "service_id")
+    service_name = get_data(chat_id, "service_name") or SERVICES.get(service_id, {}).get("name", service_id)
     time_str = get_data(chat_id, "selected_time")
     period = get_data(chat_id, "time_period")
     lat = get_data(chat_id, "lat")
     lon = get_data(chat_id, "lon")
     hora_completa = f"{time_str} {period}"
 
-    session = get_session(chat_id)
-    request_id = session.get("data", {}).get("request_id")
+    # ✅ CORREGIDO: Crear request usando requests_db.create_request (notifica automáticamente)
+    request_id = create_request(
+        client_id=int(chat_id),
+        service_id=service_id,
+        service_name=service_name,
+        request_time=time_str,
+        time_period=period,
+        lat=lat,
+        lon=lon,
+        address="Ubicación compartida por cliente"  # Podrías geocodificar aquí
+    )
+    
     if not request_id:
-        request_id = request_service.create_request(
-            client_chat_id=chat_id,
-            service_id=service_id,
-            hora=hora_completa,
-            lat=lat,
-            lon=lon,
-            status='waiting_acceptance'
-        )
-        if not request_id:
-            bot.answer_callback_query(call.id, "❌ Error al crear la solicitud, intentá de nuevo")
-            return
-        update_data(chat_id, request_id=request_id)
-
+        bot.answer_callback_query(call.id, "❌ Error al crear la solicitud, intentá de nuevo")
+        return
+    
+    update_data(chat_id, request_id=request_id)
     set_state(chat_id, UserState.CLIENT_WAITING_ACCEPTANCE, {"request_id": request_id})
+    
     bot.answer_callback_query(call.id, "¡Solicitud enviada! Buscando profesionales cercanos...")
+    logger.info(f"[CLIENT CONFIRM] request_id={request_id} creada y notificaciones enviadas")
 
+    # ✅ CORREGIDO: La notificación ya fue enviada por create_request()
+    # Ahora solo verificamos si hay workers disponibles para asignación directa
+    
     available_workers, status, extra = worker_jobs.find_available_workers(
         service_id, lat, lon, hora_completa
     )
@@ -223,16 +238,20 @@ def handle_client_confirmation(call):
         send_safe(chat_id, f"{Icons.WARNING} No hay profesionales disponibles en este momento. Intentá más tarde.")
         return
 
+    # ✅ ASIGNACIÓN DIRECTA AL PRIMER WORKER DISPONIBLE
     assigned_worker = available_workers[0]
     worker_id = assigned_worker[0]
-    logger.info(f"[ASSIGN] Asignando request_id={request_id} al worker_id={worker_id}")
+    logger.info(f"[ASSIGN] Intentando asignar request_id={request_id} al worker_id={worker_id}")
 
-    success = worker_jobs.assign_worker_to_request_safe(request_id, worker_id)
-    if not success:
-        logger.warning(f"[ASSIGN FAIL] request_id={request_id} worker={worker_id} ya fue tomada")
+    # ✅ CORREGIDO: Usar assign_worker_to_request de requests_db
+    result = assign_worker_to_request(request_id, worker_id)
+    
+    if not result:
+        logger.warning(f"[ASSIGN FAIL] request_id={request_id} worker={worker_id} ya fue tomada o no disponible")
         send_safe(chat_id, f"{Icons.ERROR} Lo sentimos, el profesional ya no está disponible. Intentá nuevamente.")
         return
 
+    # Obtener precio del worker
     worker_price_info = worker_jobs.db_execute(
         "SELECT precio FROM worker_services WHERE chat_id = ? AND service_id = ?",
         (worker_id, service_id),
@@ -240,11 +259,13 @@ def handle_client_confirmation(call):
     )
     price = worker_price_info[0] if worker_price_info else worker_jobs.SERVICES_PRICES.get(service_id, {}).get("price", 0)
 
+    # Mostrar confirmación al cliente
     markup = types.InlineKeyboardMarkup(row_width=2)
     markup.add(
         types.InlineKeyboardButton(f"{Icons.SUCCESS} Acepto", callback_data=f"client_accept:{request_id}"),
         types.InlineKeyboardButton(f"{Icons.ERROR} No acepto", callback_data=f"client_reject:{request_id}")
     )
+    
     send_safe(chat_id, f"""
 {Icons.PARTY} <b>¡Encontramos tu profesional!</b>
 
@@ -255,6 +276,7 @@ Servicio: {SERVICES[service_id]['name']}
 {Icons.INFO} Confirmá si aceptás el servicio.
 """, markup)
 
+    # ✅ CORREGIDO: Preparar datos para el worker (ya fue notificado, pero mostramos menú)
     worker_data = {
         "request_id": request_id,
         "service_id": service_id,
@@ -264,9 +286,11 @@ Servicio: {SERVICES[service_id]['name']}
         "lon": lon,
         "price": price
     }
-    logger.info(f"[SHOW WORKER MENU] Enviando solicitud a worker_id={worker_id}")
+    
+    logger.info(f"[SHOW WORKER MENU] Mostrando menú a worker_id={worker_id}")
     show_worker_menu(worker_id, worker_data)
 
+    # Actualizar mensaje de búsqueda
     search_text = f"""
 {Icons.SEARCH} <b>Buscando profesionales disponibles...</b>
 
@@ -277,3 +301,43 @@ Ubicación recibida ✅
 {Icons.TIME} Esto puede tardar unos segundos...
 """
     edit_safe(chat_id, call.message.message_id, search_text)
+
+# ==================== HANDLERS DE RESPUESTA DEL CLIENTE ====================
+@bot.callback_query_handler(func=lambda c: c.data.startswith("client_accept:"))
+def handle_client_accept_worker(call):
+    """Cliente acepta al worker asignado"""
+    chat_id = str(call.message.chat.id)
+    request_id = int(call.data.split(":")[1])
+    
+    # Obtener datos de la request
+    request_data = get_request(request_id)
+    if not request_data:
+        bot.answer_callback_query(call.id, "❌ Solicitud no encontrada")
+        return
+    
+    worker_id = request_data.get('worker_id')
+    if not worker_id:
+        bot.answer_callback_query(call.id, "❌ No hay profesional asignado")
+        return
+    
+    # Notificar al worker que el cliente aceptó
+    notify_client(worker_id, f"✅ ¡El cliente aceptó tu servicio! Request #{request_id}")
+    
+    bot.answer_callback_query(call.id, "¡Perfecto! El profesional será notificado.")
+    send_safe(chat_id, f"{Icons.SUCCESS} <b>¡Solicitud confirmada!</b>\n\nEl profesional ha sido notificado y se pondrá en contacto con vos.")
+    
+    logger.info(f"[CLIENT ACCEPT] request_id={request_id} aceptada por cliente {chat_id}")
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith("client_reject:"))
+def handle_client_reject_worker(call):
+    """Cliente rechaza al worker asignado"""
+    chat_id = str(call.message.chat.id)
+    request_id = int(call.data.split(":")[1])
+    
+    # Cancelar la request
+    cancel_request(request_id, reason="Cliente rechazó al profesional asignado")
+    
+    bot.answer_callback_query(call.id, "Solicitud cancelada")
+    send_safe(chat_id, f"{Icons.INFO} Solicitud cancelada. Podés crear una nueva cuando quieras.")
+    
+    logger.info(f"[CLIENT REJECT] request_id={request_id} rechazada por cliente {chat_id}")
