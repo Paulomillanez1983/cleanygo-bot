@@ -3,10 +3,12 @@ import time
 import re
 import json
 import logging
+import traceback
 from telebot import types, apihelper
 from config import bot
 from models.services_data import SERVICES
 from utils.icons import Icons
+from utils.keyboards import get_service_selector
 from database import db_execute
 
 # ==================== CONFIGURACIÓN ====================
@@ -19,21 +21,18 @@ apihelper.SESSION_TIME_TO_LIVE = 10 * 60
 
 # ==================== SESIONES EN SQLITE ====================
 def get_session(chat_id: str):
-    row = db_execute(
-        "SELECT state, data FROM sessions WHERE chat_id = ?",
-        (str(chat_id),),
-        fetch_one=True
-    )
+    row = db_execute("SELECT state, data FROM sessions WHERE chat_id = ?", (str(chat_id),), fetch_one=True)
     if row:
         state, data_json = row
         data = json.loads(data_json) if data_json else {}
         return {"state": state, "data": data}
-    db_execute(
-        "INSERT INTO sessions (chat_id, state, data, last_activity) VALUES (?, ?, ?, ?)",
-        (str(chat_id), "IDLE", "{}", int(time.time())),
-        commit=True
-    )
-    return {"state": "IDLE", "data": {}}
+    else:
+        db_execute(
+            "INSERT INTO sessions (chat_id, state, data, last_activity) VALUES (?, ?, ?, ?)",
+            (str(chat_id), "IDLE", "{}", int(time.time())),
+            commit=True
+        )
+        return {"state": "IDLE", "data": {}}
 
 def set_state(chat_id: str, state: str, data: dict = None):
     session = get_session(chat_id)
@@ -63,7 +62,7 @@ def get_data(chat_id: str, key: str, default=None):
 def clear_state(chat_id: str):
     db_execute("DELETE FROM sessions WHERE chat_id = ?", (str(chat_id),), commit=True)
 
-# ==================== INICIO FLUJO WORKER ====================
+# ==================== FLUJO WORKER ====================
 @bot.message_handler(regexp=r'(?i)(trabajar|prestador|quiero trabajar)')
 def handle_worker_start(message):
     chat_id = message.chat.id
@@ -76,11 +75,7 @@ def handle_worker_start(message):
 
 def start_worker_flow(chat_id: int):
     try:
-        worker = db_execute(
-            "SELECT * FROM workers WHERE chat_id = ?",
-            (str(chat_id),),
-            fetch_one=True
-        )
+        worker = db_execute("SELECT * FROM workers WHERE chat_id = ?", (str(chat_id),), fetch_one=True)
         if worker:
             try:
                 from handlers.worker.profile import show_worker_menu
@@ -100,7 +95,7 @@ def start_worker_flow(chat_id: int):
         markup = get_service_selector([])
         bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
     except Exception as e:
-        logger.error(f"[FLOW START ERROR] chat_id={chat_id} -> {e}")
+        logger.error(f"[FLOW START ERROR] chat_id={chat_id} -> {traceback.format_exc()}")
         bot.send_message(chat_id, f"{Icons.ERROR} Error iniciando flujo de registro.")
 
 # ==================== SELECCIÓN DE SERVICIOS ====================
@@ -125,7 +120,7 @@ def handle_service_toggle(call):
         update_data(chat_id, selected_services=selected)
         bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=get_service_selector(selected))
     except Exception as e:
-        logger.error(f"[SERVICE TOGGLE ERROR] chat_id={chat_id} -> {e}")
+        logger.error(f"[SERVICE TOGGLE ERROR] chat_id={chat_id} -> {traceback.format_exc()}")
         bot.answer_callback_query(call.id, "❌ Ocurrió un error.", show_alert=True)
 
 @bot.callback_query_handler(func=lambda c: c.data == "svc_confirm")
@@ -140,6 +135,7 @@ def handle_service_confirm(call):
         bot.delete_message(chat_id, call.message.message_id)
     except:
         pass
+
     set_state(chat_id, "WORKER_ENTERING_PRICE", {
         "services_to_price": selected[:],
         "current_service_idx": 0,
@@ -159,45 +155,33 @@ def ask_next_price(chat_id: str):
 
     service_id = services[idx]
     service_name = SERVICES.get(service_id, {}).get("name", service_id)
-
     text = f"{Icons.MONEY} <b>Precio para {service_name} ({idx+1}/{len(services)})</b>\nIngresá tarifa por hora (solo números)"
-    markup = types.InlineKeyboardMarkup(row_width=2)
-    markup.add(
-        types.InlineKeyboardButton("⏭️ Saltar", callback_data="price_skip"),
-        types.InlineKeyboardButton("❌ Cancelar", callback_data="price_cancel")
-    )
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add("⏭️ Saltar")
+    markup.add("❌ Cancelar")
     bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
-
-@bot.callback_query_handler(func=lambda c: c.data in ["price_skip", "price_cancel"])
-def handle_price_actions(call):
-    chat_id = call.message.chat.id
-    services = get_data(chat_id, "services_to_price", [])
-    idx = get_data(chat_id, "current_service_idx", 0)
-    prices = get_data(chat_id, "prices", {})
-
-    if call.data == "price_cancel":
-        cancel_flow(chat_id)
-        return
-    elif call.data == "price_skip":
-        prices[services[idx]] = None
-        update_data(chat_id, prices=prices, current_service_idx=idx+1)
-        bot.delete_message(chat_id, call.message.message_id)
-        ask_next_price(chat_id)
 
 @bot.message_handler(func=lambda m: get_session(m.chat.id)["state"] == "WORKER_ENTERING_PRICE")
 def handle_price_input(message):
     chat_id = message.chat.id
     text = message.text.strip()
+    services = get_data(chat_id, "services_to_price", [])
+    idx = get_data(chat_id, "current_service_idx", 0)
+    prices = get_data(chat_id, "prices", {})
+
     if text == "❌ Cancelar":
         cancel_flow(chat_id)
+        return
+    if text == "⏭️ Saltar":
+        prices[services[idx]] = None
+        update_data(chat_id, prices=prices, current_service_idx=idx+1)
+        ask_next_price(chat_id)
         return
     if not text.isdigit():
         bot.send_message(chat_id, "❌ Ingresá solo números.")
         return
+
     price = int(text)
-    services = get_data(chat_id, "services_to_price", [])
-    idx = get_data(chat_id, "current_service_idx", 0)
-    prices = get_data(chat_id, "prices", {})
     prices[services[idx]] = price
     update_data(chat_id, prices=prices, current_service_idx=idx+1)
     bot.send_message(chat_id, f"✅ Precio guardado: ${price}/hora")
@@ -206,14 +190,17 @@ def handle_price_input(message):
 # ==================== NOMBRE ====================
 def ask_worker_name(chat_id: str):
     text = f"{Icons.USER} <b>Paso 2/5: Tu nombre</b>\n¿Cómo te llaman los clientes?"
-    markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("❌ Cancelar", callback_data="cancel_flow"))
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add("❌ Cancelar")
     bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
 
 @bot.message_handler(func=lambda m: get_session(m.chat.id)["state"] == "WORKER_ENTERING_NAME")
 def handle_name_input(message):
     chat_id = message.chat.id
     name = message.text.strip()
+    if name == "❌ Cancelar":
+        cancel_flow(chat_id)
+        return
     if len(name) < 2:
         bot.send_message(chat_id, "❌ Nombre muy corto.")
         return
@@ -224,14 +211,17 @@ def handle_name_input(message):
 # ==================== TELÉFONO ====================
 def ask_worker_phone(chat_id: str):
     text = f"{Icons.PHONE} <b>Paso 3/5: Teléfono</b>\nIngresá tu número de contacto."
-    markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("❌ Cancelar", callback_data="cancel_flow"))
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add(types.KeyboardButton("❌ Cancelar"))
     bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
 
 @bot.message_handler(func=lambda m: get_session(m.chat.id)["state"] == "WORKER_ENTERING_PHONE")
 def handle_phone_input(message):
     chat_id = message.chat.id
     phone = re.sub(r"\D", "", message.text.strip())
+    if message.text == "❌ Cancelar":
+        cancel_flow(chat_id)
+        return
     if len(phone) < 8:
         bot.send_message(chat_id, "❌ Número inválido. Ingresá al menos 8 dígitos.")
         return
@@ -242,14 +232,17 @@ def handle_phone_input(message):
 # ==================== DNI ====================
 def ask_worker_dni(chat_id: str):
     text = f"{Icons.USER} <b>Paso 4/5: DNI</b>\nIngresá tu documento (7 u 8 dígitos)."
-    markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("❌ Cancelar", callback_data="cancel_flow"))
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add(types.KeyboardButton("❌ Cancelar"))
     bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
 
 @bot.message_handler(func=lambda m: get_session(m.chat.id)["state"] == "WORKER_ENTERING_DNI")
 def handle_dni_input(message):
     chat_id = message.chat.id
     dni = re.sub(r"\D", "", message.text.strip())
+    if message.text == "❌ Cancelar":
+        cancel_flow(chat_id)
+        return
     if not (7 <= len(dni) <= 8):
         bot.send_message(chat_id, "❌ DNI inválido. Debe tener 7 u 8 dígitos.")
         return
@@ -268,6 +261,9 @@ def ask_worker_location(chat_id: str):
 @bot.message_handler(content_types=['location'])
 def handle_location(message):
     chat_id = message.chat.id
+    session = get_session(chat_id)
+    if not session or session["state"] != "WORKER_SHARING_LOCATION":
+        return
     if not message.location:
         bot.send_message(chat_id, "❌ No se recibió la ubicación. Intentá de nuevo.", reply_markup=types.ReplyKeyboardRemove())
         return
@@ -296,15 +292,11 @@ def handle_location(message):
     clear_state(chat_id)
 
 # ==================== CANCELAR FLUJO ====================
-@bot.callback_query_handler(func=lambda c: c.data == "cancel_flow")
-def handle_cancel(call):
-    cancel_flow(call.message.chat.id)
-
 def cancel_flow(chat_id: str):
     clear_state(chat_id)
     bot.send_message(chat_id, f"{Icons.ERROR} Registro cancelado. Escribí 'trabajar' para reiniciar.", reply_markup=types.ReplyKeyboardRemove())
 
-# ==================== GUARDAR WORKER ====================
+# ==================== GUARDAR WORKER EN DB ====================
 def save_worker_data(chat_id: str, dni: str):
     name = get_data(chat_id, "worker_name")
     phone = get_data(chat_id, "worker_phone")
@@ -332,4 +324,4 @@ def save_worker_data(chat_id: str, dni: str):
             "INSERT OR REPLACE INTO worker_services (chat_id, service_id, precio) VALUES (?, ?, ?)",
             (str(chat_id), service_id, precio),
             commit=True
-        )
+    )
