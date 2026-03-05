@@ -1,8 +1,7 @@
-# services/request_service.py
 """
 Módulo para manejo de solicitudes (requests) en la base de datos.
 Incluye creación, consulta, actualización y asignación de trabajadores.
-Versión corregida para concurrencia segura al asignar trabajos.
+Versión final corregida para concurrencia segura al asignar trabajos.
 """
 
 import sqlite3
@@ -56,10 +55,7 @@ def get_request(request_id: int):
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute(
-            "SELECT * FROM requests WHERE id = ?", 
-            (request_id,)
-        )
+        cursor.execute("SELECT * FROM requests WHERE id = ?", (request_id,))
         row = cursor.fetchone()
         conn.close()
         return dict(row) if row else None
@@ -102,11 +98,11 @@ def assign_worker_to_request(request_id: int, worker_chat_id: str):
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # Transacción atómica: solo asigna si status sigue siendo 'pending' o 'searching'
+        # Transacción atómica: solo asigna si status sigue siendo 'pending', 'searching' o 'waiting_acceptance'
         cursor.execute(
             """UPDATE requests
                SET worker_chat_id = ?, status = 'assigned', accepted_at = ?
-               WHERE id = ? AND status IN ('pending', 'searching')""",
+               WHERE id = ? AND status IN ('pending', 'searching', 'waiting_acceptance')""",
             (str(worker_chat_id), int(time.time()), request_id)
         )
 
