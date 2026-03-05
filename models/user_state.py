@@ -56,7 +56,8 @@ def get_session(chat_id: str) -> dict:
             state, data_json = row
             try:
                 data = json.loads(data_json) if data_json else {}
-            except:
+            except Exception as e:
+                logger.error(f"[DB] Error parsing JSON session for {chat_id}: {e}")
                 data = {}
             return {"state": state, "data": data}
         else:
@@ -67,21 +68,19 @@ def set_state(chat_id: str, state: UserState, data: dict = None):
     """
     Guardar o actualizar sesión en SQLite.
     
-    ✅ FIX: Si data=None, preserva los datos existentes.
+    Si data=None, preserva los datos existentes.
     """
     chat_id = str(chat_id)
     timestamp = int(time.time())
-    
+
+    if data is None:
+        current = get_session(chat_id)
+        data = current.get("data", {})
+
+    data_json = json.dumps(data)
+
     with sqlite3.connect(DB_FILE) as conn:
         cursor = conn.cursor()
-        
-        # ✅ FIX: Si no se proporcionan datos, obtener los existentes
-        if data is None:
-            current = get_session(chat_id)
-            data = current.get("data", {})
-        
-        data_json = json.dumps(data)
-        
         cursor.execute('''
             INSERT INTO sessions(chat_id, state, data, last_activity)
             VALUES (?, ?, ?, ?)
@@ -91,7 +90,7 @@ def set_state(chat_id: str, state: UserState, data: dict = None):
                 last_activity=excluded.last_activity
         ''', (chat_id, state.value, data_json, timestamp))
         conn.commit()
-    
+
     logger.info(f"[DB] set_state: {chat_id} -> {state.value}, keys={list(data.keys())}")
 
 
@@ -99,16 +98,15 @@ def update_data(chat_id: str, **kwargs):
     """Actualizar solo el diccionario de datos de la sesión"""
     chat_id = str(chat_id)
     session = get_session(chat_id)
-    session_data = session["data"]
+    session_data = session.get("data", {})
     session_data.update(kwargs)
-    
-    # ✅ Pasar datos explícitamente para asegurar que se guarden
+
     current_state_str = session.get("state", UserState.IDLE.value)
     try:
         current_state = UserState(current_state_str)
     except ValueError:
         current_state = UserState.IDLE
-    
+
     set_state(chat_id, current_state, session_data)
 
 
@@ -116,7 +114,7 @@ def get_data(chat_id: str, key: str, default=None):
     """Obtener dato específico de la sesión"""
     chat_id = str(chat_id)
     session = get_session(chat_id)
-    result = session["data"].get(key, default)
+    result = session.get("data", {}).get(key, default)
     logger.info(f"[DB] get_data: {chat_id}.{key} = {result}")
     return result
 
