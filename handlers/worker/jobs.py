@@ -90,7 +90,7 @@ def handle_job_accept(call):
     service_id = request["service_id"]
     hora = request["hora"]
     
-    # Obtener el precio real que puso el trabajador
+    # ✅ Obtener el precio real que puso el trabajador en worker_services
     worker_price_info = db_execute(
         "SELECT precio FROM worker_services WHERE chat_id = ? AND service_id = ?",
         (chat_id, service_id),
@@ -98,7 +98,7 @@ def handle_job_accept(call):
     )
     price = worker_price_info[0] if worker_price_info else 0
     
-    # Nombre del servicio
+    # Nombre del servicio (default si no está en la tabla de precios)
     service_name = SERVICES_PRICES.get(service_id, {"name": service_id.capitalize()})["name"]
     
     client_text = f"""
