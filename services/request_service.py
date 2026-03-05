@@ -95,16 +95,20 @@ def assign_worker_to_request(request_id: int, worker_chat_id: str):
     """
     Asigna un trabajador a una solicitud SOLO si sigue disponible.
     Devuelve True si se asignó, False si ya fue tomada.
+    Considera solicitudes con status 'pending' o 'searching'.
     """
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
+        
+        # Intentamos asignar SOLO si sigue disponible
         cursor.execute(
             """UPDATE requests
                SET worker_chat_id = ?, status = 'assigned', accepted_at = ?
-               WHERE id = ? AND status = 'pending'""",
+               WHERE id = ? AND status IN ('pending', 'searching')""",
             (str(worker_chat_id), int(time.time()), request_id)
         )
+        
         conn.commit()
         rows_updated = cursor.rowcount
         conn.close()
@@ -115,10 +119,10 @@ def assign_worker_to_request(request_id: int, worker_chat_id: str):
         else:
             logger.warning(f"[ASSIGN REQUEST FAIL] request_id={request_id} worker={worker_chat_id} status no disponible")
             return False
+
     except Exception as e:
         logger.error(f"[ASSIGN REQUEST ERROR] request_id={request_id}, worker={worker_chat_id} -> {e}")
         return False
-
 # ==================== FUNCIÓN SEGURA PARA CALLBACKS ====================
 def assign_worker_to_request_safe(request_id: int, worker_chat_id: str):
     """
