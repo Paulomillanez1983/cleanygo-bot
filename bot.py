@@ -4,6 +4,7 @@ CleanyGo Bot - Entrada principal optimizada para Railway
 """
 
 import os
+import threading
 from flask import Flask, request, jsonify
 from telebot.types import Update
 
@@ -36,7 +37,8 @@ def webhook():
     if request.headers.get('content-type') == 'application/json':
         json_string = request.get_data().decode('utf-8')
         update = Update.de_json(json_string)
-        bot.process_new_updates([update])
+        # Ejecutar en background para no bloquear la request
+        threading.Thread(target=bot.process_new_updates, args=([update],), daemon=True).start()
         return '', 200
     return 'Forbidden', 403
 
