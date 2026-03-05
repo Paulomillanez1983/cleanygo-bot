@@ -2,6 +2,7 @@ import os
 import logging
 from telebot import TeleBot
 
+# ---------------- LOGGING ----------------
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -9,8 +10,11 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-TOKEN = os.getenv("BOT_TOKEN")  # ✅ no rompe si no existe
+# ---------------- VARIABLES ----------------
+TOKEN = os.getenv("BOT_TOKEN")
+DB_FILE = "cleanygo_ux.db"  # 🔥 la que faltaba
 
+# ---------------- BOT ----------------
 bot = None
 
 if TOKEN:
