@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 CleanyGo Bot - Entrada final para Railway
-Webhook + handlers + requests
+Webhook + handlers + requests + send_safe
 """
 
 import os
@@ -14,7 +14,6 @@ from telebot.types import Update
 TOKEN = os.getenv("BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 if not TOKEN:
     raise RuntimeError("BOT_TOKEN no definido en Variables de entorno")
-
 print(f"[INIT] Token: {TOKEN[:10]}...", file=sys.stderr)
 
 # ==================== 2. CREAR BOT ====================
@@ -30,7 +29,24 @@ print("[INIT] ✅ Bot inyectado en config", file=sys.stderr)
 config_init_db()
 print("[INIT] ✅ DB inicializada desde config", file=sys.stderr)
 
-# ==================== 5. CARGAR HANDLERS ====================
+# ==================== 5. FUNCIONES UTILES ====================
+def send_safe(chat_id, text, reply_markup=None, parse_mode="HTML"):
+    """Envía mensaje de forma segura"""
+    try:
+        return bot.send_message(chat_id, text, reply_markup=reply_markup, parse_mode=parse_mode)
+    except Exception as e:
+        logger.error(f"[SEND ERROR] {e} | ChatID: {chat_id}")
+        return None
+
+def edit_safe(chat_id, message_id, text, reply_markup=None):
+    """Edita mensaje de forma segura"""
+    try:
+        return bot.edit_message_text(text, chat_id, message_id, reply_markup=reply_markup, parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"[EDIT ERROR] {e} | MessageID: {message_id}")
+        return None
+
+# ==================== 6. CARGAR HANDLERS ====================
 try:
     import handlers.common
     import handlers.client.flow
@@ -48,7 +64,7 @@ except Exception as e:
 
 print(f"[INIT] Handlers registrados: {len(bot.message_handlers)} message handlers", file=sys.stderr)
 
-# ==================== 6. INICIALIZAR REQUESTS ====================
+# ==================== 7. INICIALIZAR REQUESTS ====================
 try:
     from requests_db import init_requests_table
     init_requests_table()
@@ -56,7 +72,7 @@ try:
 except Exception as e:
     print(f"[INIT] ⚠️ Error requests: {e}", file=sys.stderr)
 
-# ==================== 7. FLASK APP ====================
+# ==================== 8. FLASK APP ====================
 app = Flask(__name__)
 
 @app.route('/')
@@ -81,7 +97,7 @@ def webhook():
         logger.error(f"[WEBHOOK ERROR] {e}")
     return '', 200
 
-# ==================== 8. CONFIGURAR WEBHOOK (PROD) ====================
+# ==================== 9. CONFIGURAR WEBHOOK (PROD) ====================
 domain = os.environ.get('RAILWAY_PUBLIC_DOMAIN')
 if domain:
     webhook_url = f"https://{domain}/webhook"
@@ -97,7 +113,7 @@ else:
 
 print("[INIT] ✅ Bot y Flask listos para recibir webhooks", file=sys.stderr)
 
-# ==================== 9. RUN LOCAL SOLO DEBUG ====================
+# ==================== 10. RUN LOCAL SOLO DEBUG ====================
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port, debug=True)
