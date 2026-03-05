@@ -14,9 +14,9 @@ import time
 import sqlite3
 from threading import Thread
 
-# ===================== PRECIOS DE SERVICIOS (nombres por default) =====================
+# ===================== PRECIOS DE SERVICIOS =====================
 SERVICES_PRICES = {
-    "ninaera": {"name": "Niñera", "price": 1500},
+    "niñera": {"name": "Niñera", "price": 1500},
     "limpieza": {"name": "Limpieza", "price": 2000},
     "plomeria": {"name": "Plomería", "price": 2500},
 }
@@ -40,9 +40,6 @@ init_request_rejections_table()
 
 # ===================== FUNCIONES AUXILIARES =====================
 def find_available_workers(service_id, lat, lon, hora):
-    """
-    Retorna lista de trabajadores disponibles [(chat_id, distancia), ...], status y extra info
-    """
     workers = db_execute(
         "SELECT chat_id, lat, lon FROM workers WHERE service_id=? AND available=1",
         (service_id,),
@@ -50,22 +47,16 @@ def find_available_workers(service_id, lat, lon, hora):
     )
     if not workers:
         return [], "no_workers", {}
-
-    # Calcular proximidad aproximada (simplificado)
     available = []
     for w in workers:
         w_chat, w_lat, w_lon = w
-        if w_chat and w_lat and w_lon:
+        if w_chat and w_lat is not None and w_lon is not None:
             distance = ((lat - w_lat)**2 + (lon - w_lon)**2)**0.5
             available.append((w_chat, distance))
-    available.sort(key=lambda x: x[1])  # más cercano primero
+    available.sort(key=lambda x: x[1])
     return available, "ok", {"total": len(available)}
 
 def assign_worker_to_request_safe(request_id, worker_chat_id):
-    """
-    Asigna worker a request si todavía está disponible.
-    Retorna True si tuvo éxito, False si ya fue tomado.
-    """
     request = get_request(request_id)
     if not request:
         logger.error(f"[ASSIGN_SAFE] request_id={request_id} no existe")
@@ -187,12 +178,10 @@ def handle_client_accept(call):
         "hora": request.get("hora")
     })
 
-    # Botón para iniciar servicio
     markup = types.InlineKeyboardMarkup(row_width=1)
     markup.add(types.InlineKeyboardButton(f"{Icons.PLAY} Iniciar servicio", callback_data=f"start_job:{request_id}"))
     send_safe(worker_id, f"{Icons.INFO} Podés iniciar el servicio ahora.", markup)
 
-    # Integrar botón extra en menú principal del worker
     worker_data = db_execute("SELECT * FROM workers WHERE chat_id=?", (str(worker_id),), fetch_one=True)
     if worker_data:
         try:
@@ -241,7 +230,7 @@ def handle_job_reject(call):
         logger.error(f"[JOB_REJECT] Error guardando rechazo request_id={request_id}, worker={chat_id}: {e}")
 
 # ===================== HANDLER: TRABAJADOR INICIA SERVICIO =====================
-active_tracking = {}  # chat_id -> {"thread": Thread, "running": bool}
+active_tracking = {}
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("start_job:"))
 def handle_start_job(call):
@@ -297,7 +286,6 @@ def handle_finish_job(call):
 
     client_id = request.get("client_chat_id")
 
-    # Detener hilo de ubicación
     if chat_id in active_tracking:
         active_tracking[chat_id]["running"] = False
         active_tracking.pop(chat_id)
@@ -308,7 +296,6 @@ def handle_finish_job(call):
     send_safe(client_id, f"{Icons.SUCCESS} El profesional finalizó el servicio ✅")
     send_safe(chat_id, f"{Icons.SUCCESS} Servicio finalizado. Gracias por tu trabajo ✅")
 
-    # Refrescar menú del trabajador
     worker_data = db_execute("SELECT * FROM workers WHERE chat_id=?", (str(chat_id),), fetch_one=True)
     if worker_data:
         try:
