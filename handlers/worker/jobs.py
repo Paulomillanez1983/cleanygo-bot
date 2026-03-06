@@ -1,13 +1,12 @@
 """
 Handlers para gestión de trabajos/asignaciones para profesionales.
-VERSIÓN FINAL CORREGIDA
+VERSIÓN FINAL ESTABLE
 """
 
 from telebot import types
 from config import bot, logger, get_db_connection
 from models.user_state import set_state, UserState
 from utils.icons import Icons
-
 from utils.telegram_safe import send_safe, edit_safe
 
 from requests_db import (
@@ -34,8 +33,14 @@ SERVICES_PRICES = {
 # ===================== BUSCAR WORKERS =====================
 
 def find_available_workers(service_id, lat, lon, hora):
+
     try:
+
+        if lat is None or lon is None:
+            return [], "invalid_location", {}
+
         with get_db_connection() as conn:
+
             cursor = conn.cursor()
 
             cursor.execute(
@@ -75,6 +80,7 @@ def find_available_workers(service_id, lat, lon, hora):
         return available, "ok", {"total": len(available)}
 
     except Exception as e:
+
         logger.error(f"[FIND_WORKERS ERROR]: {e}")
         return [], "error", {}
 
@@ -83,16 +89,23 @@ def find_available_workers(service_id, lat, lon, hora):
 
 def assign_worker_to_request_safe(request_id, worker_id):
 
-    worker_id = int(worker_id)
+    try:
 
-    result = assign_worker_to_request(request_id, worker_id)
+        worker_id = int(worker_id)
 
-    if result:
-        logger.info(f"[ASSIGN_SAFE] request={request_id} worker={worker_id}")
-        return True
+        result = assign_worker_to_request(request_id, worker_id)
 
-    logger.warning(f"[ASSIGN_SAFE FAIL] request={request_id}")
-    return False
+        if result:
+            logger.info(f"[ASSIGN_SAFE] request={request_id} worker={worker_id}")
+            return True
+
+        logger.warning(f"[ASSIGN_SAFE FAIL] request={request_id}")
+        return False
+
+    except Exception as e:
+
+        logger.error(f"[ASSIGN_SAFE ERROR]: {e}")
+        return False
 
 
 # ===================== WORKER ACEPTA =====================
@@ -117,6 +130,7 @@ def handle_job_accept(call):
             call.message.message_id,
             f"{Icons.ERROR} <b>Trabajo no disponible</b>"
         )
+
         return
 
     if request["status"] not in ("pending", "searching", "waiting_acceptance"):
@@ -129,6 +143,7 @@ def handle_job_accept(call):
             call.message.message_id,
             f"{Icons.ERROR} <b>Trabajo no disponible</b>"
         )
+
         return
 
     success = assign_worker_to_request_safe(request_id, worker_id)
@@ -143,6 +158,7 @@ def handle_job_accept(call):
             call.message.message_id,
             f"{Icons.ERROR} <b>Trabajo no disponible</b>"
         )
+
         return
 
     set_state(worker_id, UserState.JOB_IN_PROGRESS, {
@@ -186,7 +202,7 @@ def handle_job_accept(call):
 
             row = cursor.fetchone()
 
-            price = row[0] if row else None
+            price = row["precio"] if row else None
 
     except Exception as e:
 
@@ -218,7 +234,7 @@ Servicio: {service_name}
         )
     )
 
-    send_safe(bot, client_id, text, markup)
+    send_safe(bot, client_id, text, reply_markup=markup)
 
 
 # ===================== CLIENTE ACEPTA =====================
@@ -239,6 +255,7 @@ def handle_client_accept(call):
             call.message.message_id,
             f"{Icons.ERROR} Solicitud no encontrada"
         )
+
         return
 
     update_request_status(request_id, "accepted")
@@ -266,7 +283,7 @@ def handle_client_accept(call):
         )
     )
 
-    send_safe(bot, worker_id, "Podés iniciar el servicio", markup)
+    send_safe(bot, worker_id, "Podés iniciar el servicio", reply_markup=markup)
 
 
 # ===================== CLIENTE RECHAZA =====================
@@ -348,7 +365,7 @@ def handle_start_job(call):
 
                     data = cursor.fetchone()
 
-                if data:
+                if data and data["lat"] and data["lon"]:
 
                     bot.send_location(
                         client_id,
@@ -364,8 +381,7 @@ def handle_start_job(call):
 
     active_tracking[worker_id] = {"running": True}
 
-    thread = Thread(target=location_loop, daemon=True)
-    thread.start()
+    Thread(target=location_loop, daemon=True).start()
 
 
 # ===================== FINALIZAR =====================
