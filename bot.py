@@ -93,23 +93,29 @@ def health():
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
-
     try:
-
+        logger.info(f"[WEBHOOK] Headers: {dict(request.headers)}")
+        logger.info(f"[WEBHOOK] Raw data: {request.get_data()}")
+        
         if "application/json" not in request.headers.get("content-type", ""):
-            return "invalid", 403
+            logger.warning("[WEBHOOK] Content-type inválido")
+            return "invalid content-type", 403
 
         json_string = request.get_data().decode("utf-8")
+        logger.info(f"[WEBHOOK] JSON string: {json_string[:200]}...")
 
         update_dict = json.loads(json_string)
+        logger.info(f"[WEBHOOK] Dict parsed: {update_dict}")
 
         update = Update.de_json(update_dict)
+        logger.info(f"[WEBHOOK] Update object: {update}")
 
         bot.process_new_updates([update])
+        logger.info("[WEBHOOK] Updates procesadas")
 
     except Exception as e:
-
-        logger.error(f"[WEBHOOK ERROR] {e}")
+        logger.error(f"[WEBHOOK ERROR] {e}", exc_info=True)
+        return str(e), 500  # Devolver error para verlo en logs
 
     return "", 200
 
