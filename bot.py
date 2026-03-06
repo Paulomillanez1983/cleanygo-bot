@@ -53,45 +53,21 @@ except Exception as e:
 
 
 # ==================== CARGAR Y REGISTRAR HANDLERS ====================
+# ==================== CARGAR Y REGISTRAR HANDLERS ====================
 
 try:
-    # Importar y REGISTRAR los handlers de common
+    # Importar y REGISTRAR handlers comunes
     from handlers.common import register_handlers as register_common_handlers
     register_common_handlers(bot)
     logger.info("[INIT] Handlers comunes registrados")
-    
-    # Importar otros handlers (si tienen función de registro similar)
-    # Descomenta y adapta según tus otros handlers
-    
-    # from handlers.client.flow import register_handlers as register_client_flow
-    # register_client_flow(bot)
-    
-    # from handlers.client.search import register_handlers as register_client_search
-    # register_client_search(bot)
-    
-    # from handlers.client.callbacks import register_handlers as register_client_callbacks
-    # register_client_callbacks(bot)
-    
-    # from handlers.worker.flow import register_handlers as register_worker_flow
-    # register_worker_flow(bot)
-    
-    # from handlers.worker.jobs import register_handlers as register_worker_jobs
-    # register_worker_jobs(bot)
-    
-    # from handlers.worker.profile import register_handlers as register_worker_profile
-    # register_worker_profile(bot)
-    
-    # from handlers.worker.main import register_handlers as register_worker_main
-    # register_worker_main(bot)
-    
-    # DEBUG: Ver handlers registrados
+
+    # IMPORTAR WORKER FLOW (registra handlers automáticamente)
+    import handlers.worker.flow
+    logger.info("[INIT] Worker flow cargado")
+
+    # DEBUG
     logger.info(f"[DEBUG] Total message handlers: {len(bot.message_handlers)}")
     logger.info(f"[DEBUG] Total callback handlers: {len(bot.callback_query_handlers)}")
-    
-    # Listar comandos registrados
-    for i, handler in enumerate(bot.message_handlers):
-        if hasattr(handler, 'filters'):
-            logger.info(f"[DEBUG] Handler {i}: {handler.filters}")
 
 except Exception as e:
     logger.error(f"[ERROR] Cargando handlers: {e}")
