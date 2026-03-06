@@ -68,3 +68,25 @@ Conectamos personas que necesitan servicios con profesionales confiables cerca d
             text,
             parse_mode="HTML"
         )
+        # ==================== ROLE SELECTION ====================
+
+@bot.message_handler(func=lambda message: True, content_types=['text'])
+def handle_main_menu(message):
+    chat_id = message.chat.id
+    text = message.text.strip()
+
+    logger.info(f"[MENU] Texto recibido: {text} | chat_id={chat_id}")
+
+    if "Necesito un servicio" in text:
+        from handlers.client.flow import start_client_flow
+        start_client_flow(message)
+        return
+
+    if "Quiero trabajar" in text:
+        from handlers.worker.main import show_worker_menu
+        show_worker_menu(message)
+        return
+
+    if "Ayuda" in text:
+        cmd_help(message)
+        return
