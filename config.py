@@ -434,4 +434,10 @@ async def notify_client(chat_id: int, message: str):
 
     except Exception as e:
         logger.error(f"❌ Error enviando notificación: {e}")
-        notify_worker = Notifier.notify_worker
+
+
+# =========================
+# COMPATIBILIDAD IMPORTS
+# =========================
+
+notify_worker = Notifier.notify_worker
