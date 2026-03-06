@@ -134,24 +134,28 @@ Conectamos personas que necesitan servicios con profesionales confiables cerca d
 
         logger.info(f"[MENU] Texto recibido: {text} | chat_id={chat_id}")
 
-        # Cliente
+        # ================= CLIENTE =================
+
         if "necesito un servicio" in text:
             from handlers.client.flow import start_client_flow
             start_client_flow(message)
             return
 
-        # Trabajador
+        # ================= TRABAJADOR =================
+
         if "quiero trabajar" in text:
             from handlers.worker.main import show_worker_menu
-            show_worker_menu(message)
+            show_worker_menu(message.chat.id)   # ✅ CORREGIDO
             return
 
-        # Ayuda
+        # ================= AYUDA =================
+
         if "ayuda" in text:
             cmd_help(message)
             return
 
-        # Texto desconocido
+        # ================= DESCONOCIDO =================
+
         send_safe(
             bot,
             chat_id,
