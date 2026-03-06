@@ -9,6 +9,7 @@ import time
 from config import DB_FILE, logger, get_db_connection
 from utils.icons import Icons
 
+
 # ==================== INICIALIZACIÓN DB ====================
 def init_db():
     """
@@ -18,37 +19,36 @@ def init_db():
     with get_db_connection() as conn:
         cursor = conn.cursor()
 
-        # ==================== TABLA WORKERS (UNIFICADA) ====================
-        # Usa user_id (INTEGER) como en config.py, pero mantiene chat_id para compatibilidad
+        # ==================== TABLA WORKERS ====================
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS workers (
                 user_id INTEGER PRIMARY KEY,
-                chat_id TEXT UNIQUE,  -- Para compatibilidad hacia atrás
+                chat_id TEXT UNIQUE,
                 name TEXT,
-                nombre TEXT,          -- Alias para compatibilidad
+                nombre TEXT,
                 phone TEXT,
-                telefono TEXT,        -- Alias para compatibilidad
+                telefono TEXT,
                 email TEXT,
                 address TEXT,
                 dni_file_id TEXT,
                 lat REAL,
                 lon REAL,
                 is_active BOOLEAN DEFAULT 1,
-                disponible INTEGER DEFAULT 1,  -- Alias para compatibilidad
+                disponible INTEGER DEFAULT 1,
                 current_request_id INTEGER DEFAULT NULL,
                 rating REAL DEFAULT 5.0,
                 total_jobs INTEGER DEFAULT 0,
                 last_update INTEGER,
-                created_at INTEGER DEFAULT (strftime('%s', 'now'))
+                created_at INTEGER DEFAULT (strftime('%s','now'))
             )
         ''')
 
-        # ==================== TABLA WORKER_SERVICES (UNIFICADA) ====================
+        # ==================== TABLA WORKER_SERVICES ====================
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS worker_services (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER,
-                chat_id TEXT,  -- Para compatibilidad
+                chat_id TEXT,
                 service_id TEXT NOT NULL,
                 precio REAL DEFAULT 0,
                 UNIQUE(user_id, service_id),
@@ -56,53 +56,52 @@ def init_db():
             )
         ''')
 
-        # ==================== TABLA REQUESTS (UNIFICADA) ====================
-        # Combina campos de ambos esquemas
+        # ==================== TABLA REQUESTS ====================
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS requests (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                client_id INTEGER,           -- Nuevo esquema
-                client_chat_id TEXT,           -- Compatibilidad antigua
+                client_id INTEGER,
+                client_chat_id TEXT,
                 service_id TEXT NOT NULL,
                 service_name TEXT,
-                request_time TEXT,             -- Nuevo esquema
-                time_period TEXT,              -- Nuevo esquema
-                fecha TEXT,                    -- Compatibilidad
-                hora TEXT,                     -- Compatibilidad
+                request_time TEXT,
+                time_period TEXT,
+                fecha TEXT,
+                hora TEXT,
                 lat REAL NOT NULL,
                 lon REAL NOT NULL,
                 address TEXT,
-                worker_id INTEGER,             -- Nuevo esquema
-                worker_chat_id TEXT,           -- Compatibilidad
+                worker_id INTEGER,
+                worker_chat_id TEXT,
                 status TEXT DEFAULT 'pending',
                 precio_acordado REAL,
-                created_at INTEGER DEFAULT (strftime('%s', 'now')),
+                created_at INTEGER DEFAULT (strftime('%s','now')),
                 accepted_at INTEGER,
                 completed_at INTEGER,
                 FOREIGN KEY (worker_id) REFERENCES workers(user_id)
             )
         ''')
 
-        # ==================== TABLA RATINGS (UNIFICADA) ====================
+        # ==================== TABLA RATINGS ====================
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS ratings (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 request_id INTEGER,
                 from_user_id INTEGER,
                 to_user_id INTEGER,
-                from_chat_id TEXT,  -- Compatibilidad
-                to_chat_id TEXT,    -- Compatibilidad
+                from_chat_id TEXT,
+                to_chat_id TEXT,
                 rating INTEGER,
                 comment TEXT,
-                created_at INTEGER DEFAULT (strftime('%s', 'now'))
+                created_at INTEGER DEFAULT (strftime('%s','now'))
             )
         ''')
 
-        # ==================== TABLA SESSIONS (UNIFICADA) ====================
+        # ==================== TABLA SESSIONS ====================
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS sessions (
                 user_id INTEGER PRIMARY KEY,
-                chat_id TEXT UNIQUE,  -- Compatibilidad
+                chat_id TEXT UNIQUE,
                 state TEXT,
                 data TEXT DEFAULT '{}',
                 last_activity INTEGER,
@@ -110,7 +109,7 @@ def init_db():
             )
         ''')
 
-        # ==================== TABLA REJECTIONS (NUEVA) ====================
+        # ==================== TABLA REJECTIONS ====================
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS request_rejections (
                 request_id INTEGER NOT NULL,
@@ -127,30 +126,30 @@ def init_db():
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_requests_worker ON requests(worker_id)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_requests_client ON requests(client_id)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_workers_active ON workers(is_active)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_sessions_chat_id ON sessions(chat_id)')
 
         conn.commit()
 
-        # ==================== MIGRACIÓN DE DATOS (si es necesario) ====================
+        # ==================== MIGRACIONES ====================
         _migrate_old_data(cursor, conn)
+        _ensure_columns(cursor, conn)
 
     logger.info(f"{Icons.SUCCESS} Base de datos unificada inicializada")
 
+
+# ==================== MIGRACIÓN DE ESQUEMA ANTIGUO ====================
 def _migrate_old_data(cursor, conn):
-    """
-    Migra datos del esquema antiguo al nuevo si existen
-    """
+
     try:
-        # Verificar si existe tabla antigua con estructura diferente
         cursor.execute("PRAGMA table_info(workers)")
         columns = [col[1] for col in cursor.fetchall()]
-        
-        # Si existe chat_id pero no user_id, necesitamos migrar
+
         if 'chat_id' in columns and 'user_id' not in columns:
+
             logger.info(f"{Icons.WARNING} Detectado esquema antiguo, migrando...")
-            
-            # Crear tabla temporal con nuevo esquema
+
             cursor.execute('''
-                CREATE TABLE IF NOT EXISTS workers_new (
+                CREATE TABLE workers_new (
                     user_id INTEGER PRIMARY KEY,
                     chat_id TEXT UNIQUE,
                     name TEXT,
@@ -164,20 +163,19 @@ def _migrate_old_data(cursor, conn):
                     lon REAL,
                     is_active BOOLEAN DEFAULT 1,
                     disponible INTEGER DEFAULT 1,
-                    current_request_id INTEGER DEFAULT NULL,
+                    current_request_id INTEGER,
                     rating REAL DEFAULT 5.0,
                     total_jobs INTEGER DEFAULT 0,
                     last_update INTEGER,
-                    created_at INTEGER DEFAULT (strftime('%s', 'now'))
+                    created_at INTEGER DEFAULT (strftime('%s','now'))
                 )
             ''')
-            
-            # Migrar datos: chat_id -> user_id (convertir a int)
+
             cursor.execute('''
-                INSERT INTO workers_new 
-                (user_id, chat_id, nombre, telefono, dni_file_id, lat, lon, 
+                INSERT INTO workers_new
+                (user_id, chat_id, nombre, telefono, dni_file_id, lat, lon,
                  disponible, rating, total_jobs, last_update, created_at)
-                SELECT 
+                SELECT
                     CAST(chat_id AS INTEGER),
                     chat_id,
                     nombre,
@@ -192,130 +190,193 @@ def _migrate_old_data(cursor, conn):
                     created_at
                 FROM workers
             ''')
-            
-            # Reemplazar tabla
+
             cursor.execute("DROP TABLE workers")
             cursor.execute("ALTER TABLE workers_new RENAME TO workers")
-            
+
             conn.commit()
+
             logger.info(f"{Icons.SUCCESS} Migración completada")
-            
+
     except Exception as e:
         logger.error(f"Error en migración: {e}")
 
-# ==================== EJECUTAR CONSULTAS (COMPATIBILIDAD) ====================
+
+# ==================== MIGRACIÓN DE COLUMNAS ====================
+def _ensure_columns(cursor, conn):
+
+    try:
+
+        # ---------- SESSIONS ----------
+        cursor.execute("PRAGMA table_info(sessions)")
+        columns = [c[1] for c in cursor.fetchall()]
+
+        if "chat_id" not in columns:
+            logger.info("Migrando sessions → chat_id")
+            cursor.execute("ALTER TABLE sessions ADD COLUMN chat_id TEXT")
+
+        if "last_activity" not in columns:
+            logger.info("Migrando sessions → last_activity")
+            cursor.execute("ALTER TABLE sessions ADD COLUMN last_activity INTEGER")
+
+        # ---------- REQUESTS ----------
+        cursor.execute("PRAGMA table_info(requests)")
+        columns = [c[1] for c in cursor.fetchall()]
+
+        if "worker_id" not in columns:
+            logger.info("Migrando requests → worker_id")
+            cursor.execute("ALTER TABLE requests ADD COLUMN worker_id INTEGER")
+
+        if "client_id" not in columns:
+            logger.info("Migrando requests → client_id")
+            cursor.execute("ALTER TABLE requests ADD COLUMN client_id INTEGER")
+
+        conn.commit()
+
+    except Exception as e:
+        logger.error(f"Error asegurando columnas: {e}")
+
+
+# ==================== EJECUTAR CONSULTAS ====================
 def db_execute(query, params=(), fetch_one=False, commit=False):
-    """
-    Ejecuta consultas SQL de manera segura.
-    Mantiene compatibilidad con código antiguo.
-    """
+
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(query, params)
+
             if commit:
                 conn.commit()
+
             if fetch_one:
                 row = cursor.fetchone()
                 return dict(row) if row else None
+
             return [dict(row) for row in cursor.fetchall()]
+
     except Exception as e:
         logger.error(f"DB Error: {e}")
         return None
 
-# ==================== FUNCIONES DE SESIÓN (COMPATIBILIDAD) ====================
+
+# ==================== SESIONES ====================
 def get_session(chat_id):
-    """
-    Obtiene sesión por chat_id (compatibilidad con código antiguo)
-    """
+
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
-            # Buscar por user_id o chat_id
-            cursor.execute('''
-                SELECT state, data FROM sessions 
-                WHERE user_id = ? OR chat_id = ?
-            ''', (int(chat_id), str(chat_id)))
+
+            cursor.execute(
+                "SELECT state,data FROM sessions WHERE user_id=? OR chat_id=?",
+                (int(chat_id), str(chat_id))
+            )
+
             row = cursor.fetchone()
-            
+
             if row:
-                state, data_json = row['state'], row['data']
                 try:
-                    data = json.loads(data_json) if data_json else {}
+                    data = json.loads(row["data"]) if row["data"] else {}
                 except:
                     data = {}
-                return {"state": state, "data": data}
+
+                return {
+                    "state": row["state"],
+                    "data": data
+                }
+
             return None
+
     except Exception as e:
         logger.error(f"Error get_session: {e}")
         return None
 
+
 def set_state(chat_id, state, data=None):
-    """
-    Establece estado por chat_id (compatibilidad)
-    """
+
     try:
+
         data_json = json.dumps(data or {})
         timestamp = int(time.time())
-        
+
         with get_db_connection() as conn:
             cursor = conn.cursor()
+
             cursor.execute('''
-                INSERT INTO sessions(user_id, chat_id, state, data, last_activity, updated_at)
-                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                INSERT INTO sessions(user_id,chat_id,state,data,last_activity,updated_at)
+                VALUES (?,?,?,?,?,CURRENT_TIMESTAMP)
                 ON CONFLICT(user_id) DO UPDATE SET
                     state=excluded.state,
                     data=excluded.data,
                     last_activity=excluded.last_activity,
                     updated_at=CURRENT_TIMESTAMP
-            ''', (int(chat_id), str(chat_id), state, data_json, timestamp))
+            ''', (
+                int(chat_id),
+                str(chat_id),
+                state,
+                data_json,
+                timestamp
+            ))
+
             conn.commit()
+
     except Exception as e:
         logger.error(f"Error set_state: {e}")
 
+
 def update_data(chat_id, **kwargs):
-    """
-    Actualiza datos de sesión (compatibilidad)
-    """
+
     session = get_session(chat_id) or {"state": None, "data": {}}
     session_data = session["data"]
     session_data.update(kwargs)
+
     set_state(chat_id, session["state"], session_data)
 
+
 def clear_state(chat_id):
-    """
-    Limpia sesión por chat_id (compatibilidad)
-    """
+
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
+
             cursor.execute(
-                "DELETE FROM sessions WHERE user_id = ? OR chat_id = ?", 
+                "DELETE FROM sessions WHERE user_id=? OR chat_id=?",
                 (int(chat_id), str(chat_id))
             )
+
             conn.commit()
+
     except Exception as e:
         logger.error(f"Error clear_state: {e}")
 
-# ==================== FUNCIONES AUXILIARES PARA MIGRACIÓN ====================
+
+# ==================== MIGRACIÓN GRADUAL ====================
 def ensure_worker_exists(chat_id, nombre="Trabajador"):
-    """
-    Asegura que un worker exista en la tabla (para migración gradual)
-    """
+
     try:
+
         with get_db_connection() as conn:
             cursor = conn.cursor()
+
             cursor.execute(
-                "SELECT user_id FROM workers WHERE user_id = ? OR chat_id = ?", 
+                "SELECT user_id FROM workers WHERE user_id=? OR chat_id=?",
                 (int(chat_id), str(chat_id))
             )
+
             if not cursor.fetchone():
-                # Crear worker con ambos IDs
+
                 cursor.execute('''
-                    INSERT INTO workers (user_id, chat_id, name, nombre, is_active, disponible)
-                    VALUES (?, ?, ?, ?, 1, 1)
-                ''', (int(chat_id), str(chat_id), nombre, nombre))
+                    INSERT INTO workers (user_id,chat_id,name,nombre,is_active,disponible)
+                    VALUES (?,?,?,?,1,1)
+                ''', (
+                    int(chat_id),
+                    str(chat_id),
+                    nombre,
+                    nombre
+                ))
+
                 conn.commit()
+
                 logger.info(f"Worker {chat_id} creado automáticamente")
+
     except Exception as e:
         logger.error(f"Error ensure_worker: {e}")
