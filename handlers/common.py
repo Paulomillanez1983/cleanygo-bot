@@ -8,7 +8,7 @@ def register_handlers(bot):
 
     # ==================== START ====================
 
-    @bot.message_handler(commands=['start'])
+    @bot.message_handler(commands=["start"])
     def cmd_start(message):
 
         chat_id = message.chat.id
@@ -32,10 +32,11 @@ Conectamos personas que necesitan servicios con profesionales confiables cerca d
 
         set_state(chat_id, UserState.SELECTING_ROLE)
 
+        logger.info(f"[START] Usuario inició bot | chat_id={chat_id}")
 
     # ==================== CANCEL ====================
 
-    @bot.message_handler(commands=['cancel'])
+    @bot.message_handler(commands=["cancel"])
     def cmd_cancel(message):
 
         chat_id = message.chat.id
@@ -47,10 +48,11 @@ Conectamos personas que necesitan servicios con profesionales confiables cerca d
             f"{Icons.SUCCESS} Cancelado. Usá /start para comenzar de nuevo."
         )
 
+        logger.info(f"[CANCEL] Flujo cancelado | chat_id={chat_id}")
 
     # ==================== HELP ====================
 
-    @bot.message_handler(commands=['help', 'ayuda'])
+    @bot.message_handler(commands=["help", "ayuda"])
     def cmd_help(message):
 
         text = f"""
@@ -77,10 +79,9 @@ Conectamos personas que necesitan servicios con profesionales confiables cerca d
             parse_mode="HTML"
         )
 
-
     # ==================== MENU PRINCIPAL ====================
 
-    @bot.message_handler(func=lambda message: True, content_types=['text'])
+    @bot.message_handler(func=lambda message: True, content_types=["text"])
     def handle_main_menu(message):
 
         chat_id = message.chat.id
@@ -88,6 +89,7 @@ Conectamos personas que necesitan servicios con profesionales confiables cerca d
 
         logger.info(f"[MENU] Texto recibido: {text} | chat_id={chat_id}")
 
+        # Cliente
         if "Necesito un servicio" in text:
 
             from handlers.client.flow import start_client_flow
@@ -95,6 +97,7 @@ Conectamos personas que necesitan servicios con profesionales confiables cerca d
             start_client_flow(message)
             return
 
+        # Trabajador
         if "Quiero trabajar" in text:
 
             from handlers.worker.main import show_worker_menu
@@ -102,7 +105,14 @@ Conectamos personas que necesitan servicios con profesionales confiables cerca d
             show_worker_menu(message)
             return
 
+        # Ayuda
         if "Ayuda" in text:
 
             cmd_help(message)
             return
+
+        # Texto desconocido
+        bot.send_message(
+            chat_id,
+            f"{Icons.INFO} No entendí esa opción. Usá el menú o escribí /start."
+        )
