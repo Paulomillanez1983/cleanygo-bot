@@ -213,7 +213,6 @@ def handle_price_input(message):
         return
 
     price = int(text)
-    # Validación de rango
     if price <= 0 or price > 10000:
         bot.send_message(chat_id, "❌ Precio inválido. Ingresá un número entre 1 y 10.000.")
         return
