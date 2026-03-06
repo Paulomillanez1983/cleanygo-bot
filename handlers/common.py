@@ -136,24 +136,23 @@ Conectamos personas que necesitan servicios con profesionales confiables cerca d
 
         # ================= CLIENTE =================
 
-if "necesito un servicio" in text:
-    from handlers.client.flow import start_client_flow
-    start_client_flow(message)
-    return
+        if "necesito un servicio" in text:
+            from handlers.client.flow import start_client_flow
+            start_client_flow(message)
+            return
 
-# ================= TRABAJADOR =================
+        # ================= TRABAJADOR =================
 
-if "trabajar" in text:
-    from handlers.worker.flow import start_worker_flow
-    start_worker_flow(message.chat.id)
-    return
+        if "trabajar" in text:
+            from handlers.worker.flow import start_worker_flow
+            start_worker_flow(message.chat.id)
+            return
 
-# ================= AYUDA =================
+        # ================= AYUDA =================
 
-if "ayuda" in text:
-    cmd_help(message)
-    return
-
+        if "ayuda" in text:
+            cmd_help(message)
+            return
 
         # ================= DESCONOCIDO =================
 
