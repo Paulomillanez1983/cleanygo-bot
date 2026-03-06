@@ -6,12 +6,13 @@ Webhook + handlers + DB + logging
 
 import os
 import time
+import json
 
 from telebot import TeleBot
 from telebot.types import Update
 from flask import Flask, jsonify, request
 
-# ==================== 1. CONFIG ====================
+# ==================== CONFIG ====================
 
 from config import inject_bot, init_db as config_init_db, logger
 
@@ -22,7 +23,7 @@ if not TOKEN:
 
 logger.info(f"[INIT] Token cargado: {TOKEN[:10]}...")
 
-# ==================== 2. CREAR BOT ====================
+# ==================== CREAR BOT ====================
 
 bot = TeleBot(
     TOKEN,
@@ -32,17 +33,17 @@ bot = TeleBot(
 
 logger.info(f"[INIT] Bot creado: {id(bot)}")
 
-# ==================== 3. INYECTAR BOT ====================
+# ==================== INYECTAR BOT ====================
 
 inject_bot(bot)
 logger.info("[INIT] Bot inyectado en config")
 
-# ==================== 4. INICIALIZAR DB ====================
+# ==================== DB ====================
 
 config_init_db()
 logger.info("[INIT] Base de datos inicializada")
 
-# ==================== 5. FUNCIONES SEGURAS ====================
+# ==================== FUNCIONES SEGURAS ====================
 
 def send_safe(chat_id, text, reply_markup=None, parse_mode="HTML"):
     try:
@@ -71,7 +72,7 @@ def edit_safe(chat_id, message_id, text, reply_markup=None):
         return None
 
 
-# ==================== 6. CARGAR HANDLERS ====================
+# ==================== CARGAR HANDLERS ====================
 
 try:
 
@@ -92,7 +93,6 @@ except Exception as e:
     logger.error(f"[ERROR] Cargando handlers: {e}")
     raise
 
-
 try:
     handlers_count = len(bot._message_handlers)
 except:
@@ -100,7 +100,7 @@ except:
 
 logger.info(f"[INIT] Handlers registrados: {handlers_count}")
 
-# ==================== 7. TABLA REQUESTS ====================
+# ==================== TABLA REQUESTS ====================
 
 try:
 
@@ -115,10 +115,9 @@ except Exception as e:
     logger.warning(f"[WARN] No se pudo inicializar requests: {e}")
 
 
-# ==================== 8. FLASK APP ====================
+# ==================== FLASK ====================
 
 app = Flask(__name__)
-
 
 @app.route("/")
 @app.route("/health")
@@ -132,19 +131,21 @@ def health():
     }), 200
 
 
-# ==================== 9. WEBHOOK ====================
+# ==================== WEBHOOK ====================
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
 
     try:
 
-        update_json = request.get_json(force=True)
+        if "application/json" not in request.headers.get("content-type",""):
+            return "invalid", 403
 
-        if not update_json:
-            return "no update", 200
+        json_string = request.get_data().decode("utf-8")
 
-        update = Update.de_json(update_json, bot)
+        update_dict = json.loads(json_string)
+
+        update = Update.de_json(update_dict)
 
         bot.process_new_updates([update])
 
@@ -155,7 +156,7 @@ def webhook():
     return "", 200
 
 
-# ==================== 10. CONFIGURAR WEBHOOK ====================
+# ==================== CONFIGURAR WEBHOOK ====================
 
 domain = os.environ.get("RAILWAY_PUBLIC_DOMAIN")
 
@@ -198,7 +199,7 @@ else:
 logger.info("[INIT] Bot listo para recibir webhooks")
 
 
-# ==================== 11. RUN LOCAL (DEBUG) ====================
+# ==================== RUN LOCAL ====================
 
 if __name__ == "__main__":
 
