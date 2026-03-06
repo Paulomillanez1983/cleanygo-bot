@@ -5,7 +5,6 @@ Webhook + handlers + DB + logging
 """
 
 import os
-import json
 import time
 
 from telebot import TeleBot
@@ -86,15 +85,20 @@ try:
     import handlers.worker.profile
     import handlers.worker.main
 
-    logger.info("Handlers cargados correctamente")
+    logger.info("[INIT] Handlers cargados correctamente")
 
 except Exception as e:
 
-    logger.error(f"Error cargando handlers: {e}")
+    logger.error(f"[ERROR] Cargando handlers: {e}")
     raise
 
-logger.info(f"Handlers registrados: {len(bot.message_handlers)}")
 
+try:
+    handlers_count = len(bot._message_handlers)
+except:
+    handlers_count = "unknown"
+
+logger.info(f"[INIT] Handlers registrados: {handlers_count}")
 
 # ==================== 7. TABLA REQUESTS ====================
 
@@ -104,11 +108,11 @@ try:
 
     init_requests_table()
 
-    logger.info("Tabla requests inicializada")
+    logger.info("[INIT] Tabla requests inicializada")
 
 except Exception as e:
 
-    logger.warning(f"No se pudo inicializar requests: {e}")
+    logger.warning(f"[WARN] No se pudo inicializar requests: {e}")
 
 
 # ==================== 8. FLASK APP ====================
@@ -123,7 +127,7 @@ def health():
     return jsonify({
         "status": "healthy",
         "bot": "online",
-        "handlers": len(bot.message_handlers),
+        "handlers": handlers_count,
         "timestamp": time.time()
     }), 200
 
@@ -140,7 +144,7 @@ def webhook():
         if not update_json:
             return "no update", 200
 
-        update = Update.de_json(update_json)
+        update = Update.de_json(update_json, bot)
 
         bot.process_new_updates([update])
 
@@ -165,29 +169,33 @@ if domain:
 
         if current.url != webhook_url:
 
+            logger.info("[INIT] Configurando webhook...")
+
             bot.remove_webhook(drop_pending_updates=True)
+
+            time.sleep(1)
 
             bot.set_webhook(
                 url=webhook_url,
                 drop_pending_updates=True
             )
 
-            logger.info(f"Webhook configurado: {webhook_url}")
+            logger.info(f"[INIT] Webhook configurado: {webhook_url}")
 
         else:
 
-            logger.info(f"Webhook ya configurado: {webhook_url}")
+            logger.info(f"[INIT] Webhook ya configurado: {webhook_url}")
 
     except Exception as e:
 
-        logger.error(f"Error configurando webhook: {e}")
+        logger.error(f"[ERROR] Configurando webhook: {e}")
 
 else:
 
-    logger.error("RAILWAY_PUBLIC_DOMAIN no definido. Webhook NO configurado.")
+    logger.error("[ERROR] RAILWAY_PUBLIC_DOMAIN no definido. Webhook NO configurado.")
 
 
-logger.info("Bot listo para recibir webhooks")
+logger.info("[INIT] Bot listo para recibir webhooks")
 
 
 # ==================== 11. RUN LOCAL (DEBUG) ====================
@@ -199,5 +207,5 @@ if __name__ == "__main__":
     app.run(
         host="0.0.0.0",
         port=port,
-        debug=True
+        debug=False
     )
