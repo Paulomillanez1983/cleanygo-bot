@@ -46,78 +46,36 @@ try:
 except Exception as e:
     logger.error(f"[DB ERROR] {e}")
 
-# ==================== FUNCIONES SEGURAS ====================
-
-def send_safe(chat_id, text, reply_markup=None, parse_mode="HTML"):
-    try:
-        return bot.send_message(
-            chat_id,
-            text,
-            reply_markup=reply_markup,
-            parse_mode=parse_mode
-        )
-    except Exception as e:
-        logger.error(f"[SEND ERROR] {e} | ChatID: {chat_id}")
-        return None
-
-
-def edit_safe(chat_id, message_id, text, reply_markup=None):
-    try:
-        return bot.edit_message_text(
-            text,
-            chat_id,
-            message_id,
-            reply_markup=reply_markup,
-            parse_mode="HTML"
-        )
-    except Exception as e:
-        logger.error(f"[EDIT ERROR] {e} | MessageID: {message_id}")
-        return None
-
-
 # ==================== CARGAR HANDLERS ====================
 
 try:
 
-    import handlers.common
-    import handlers.client.flow
-    import handlers.client.search
-    import handlers.client.callbacks
+    from handlers.common import register_handlers as register_common
+    from handlers.client.flow import register_handlers as register_client_flow
+    from handlers.client.search import register_handlers as register_client_search
+    from handlers.client.callbacks import register_handlers as register_client_callbacks
 
-    import handlers.worker.flow
-    import handlers.worker.jobs
-    import handlers.worker.profile
-    import handlers.worker.main
+    from handlers.worker.flow import register_handlers as register_worker_flow
+    from handlers.worker.jobs import register_handlers as register_worker_jobs
+    from handlers.worker.profile import register_handlers as register_worker_profile
+    from handlers.worker.main import register_handlers as register_worker_main
 
-    logger.info("[INIT] Handlers cargados correctamente")
+    register_common(bot)
+    register_client_flow(bot)
+    register_client_search(bot)
+    register_client_callbacks(bot)
+
+    register_worker_flow(bot)
+    register_worker_jobs(bot)
+    register_worker_profile(bot)
+    register_worker_main(bot)
+
+    logger.info("[INIT] Handlers registrados correctamente")
 
 except Exception as e:
 
     logger.error(f"[ERROR] Cargando handlers: {e}")
     raise
-
-# ==================== CONTAR HANDLERS ====================
-
-try:
-    handlers_count = len(bot.message_handlers)
-except:
-    handlers_count = "unknown"
-
-logger.info(f"[INIT] Handlers registrados: {handlers_count}")
-
-# ==================== TABLA REQUESTS ====================
-
-try:
-
-    from requests_db import init_requests_table
-
-    init_requests_table()
-
-    logger.info("[INIT] Tabla requests inicializada")
-
-except Exception as e:
-
-    logger.warning(f"[WARN] No se pudo inicializar requests: {e}")
 
 # ==================== FLASK ====================
 
@@ -130,7 +88,6 @@ def health():
     return jsonify({
         "status": "healthy",
         "bot": "online",
-        "handlers": handlers_count,
         "timestamp": time.time()
     }), 200
 
@@ -142,7 +99,7 @@ def webhook():
 
     try:
 
-        if "application/json" not in request.headers.get("content-type",""):
+        if "application/json" not in request.headers.get("content-type", ""):
             return "invalid", 403
 
         json_string = request.get_data().decode("utf-8")
