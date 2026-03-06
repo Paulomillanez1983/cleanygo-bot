@@ -3,8 +3,7 @@ from utils.icons import Icons
 from utils.keyboards import get_role_keyboard
 from config import logger
 from telebot.types import ReplyKeyboardRemove
-
-================= SAFE MESSAGES =================
+# ================= SAFE MESSAGES =================
 
 def send_safe(bot, chat_id, text, reply_markup=None, parse_mode="HTML"):
 try:
