@@ -12,9 +12,9 @@ from telebot import TeleBot
 from telebot.types import Update
 from flask import Flask, jsonify, request
 
-# ==================== CONFIG ====================
-
 from config import inject_bot, init_db as config_init_db, logger
+
+# ==================== CONFIG ====================
 
 TOKEN = os.getenv("BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 
@@ -40,8 +40,11 @@ logger.info("[INIT] Bot inyectado en config")
 
 # ==================== DB ====================
 
-config_init_db()
-logger.info("[INIT] Base de datos inicializada")
+try:
+    config_init_db()
+    logger.info("[INIT] Base de datos inicializada")
+except Exception as e:
+    logger.error(f"[DB ERROR] {e}")
 
 # ==================== FUNCIONES SEGURAS ====================
 
@@ -93,16 +96,14 @@ except Exception as e:
     logger.error(f"[ERROR] Cargando handlers: {e}")
     raise
 
-
 # ==================== CONTAR HANDLERS ====================
 
 try:
     handlers_count = len(bot.message_handlers)
-except Exception:
+except:
     handlers_count = "unknown"
 
 logger.info(f"[INIT] Handlers registrados: {handlers_count}")
-
 
 # ==================== TABLA REQUESTS ====================
 
@@ -118,11 +119,9 @@ except Exception as e:
 
     logger.warning(f"[WARN] No se pudo inicializar requests: {e}")
 
-
 # ==================== FLASK ====================
 
 app = Flask(__name__)
-
 
 @app.route("/")
 @app.route("/health")
@@ -143,14 +142,14 @@ def webhook():
 
     try:
 
-        # Telegram envía JSON
-        update_json = request.get_json(force=True, silent=True)
+        if "application/json" not in request.headers.get("content-type",""):
+            return "invalid", 403
 
-        if not update_json:
-            logger.warning("[WEBHOOK] Update vacío")
-            return "no update", 200
+        json_string = request.get_data().decode("utf-8")
 
-        update = Update.de_json(update_json, bot)
+        update_dict = json.loads(json_string)
+
+        update = Update.de_json(update_dict)
 
         bot.process_new_updates([update])
 
@@ -200,9 +199,7 @@ else:
 
     logger.error("[ERROR] RAILWAY_PUBLIC_DOMAIN no definido. Webhook NO configurado.")
 
-
 logger.info("[INIT] Bot listo para recibir webhooks")
-
 
 # ==================== RUN LOCAL ====================
 
