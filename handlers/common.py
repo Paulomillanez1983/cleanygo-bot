@@ -1,8 +1,12 @@
 from models.user_state import clear_state, set_state, UserState
 from utils.icons import Icons
 from utils.keyboards import get_role_keyboard
+from config import logger
+
 
 def register_handlers(bot):
+
+    # ==================== START ====================
 
     @bot.message_handler(commands=['start'])
     def cmd_start(message):
@@ -29,6 +33,8 @@ Conectamos personas que necesitan servicios con profesionales confiables cerca d
         set_state(chat_id, UserState.SELECTING_ROLE)
 
 
+    # ==================== CANCEL ====================
+
     @bot.message_handler(commands=['cancel'])
     def cmd_cancel(message):
 
@@ -42,7 +48,9 @@ Conectamos personas que necesitan servicios con profesionales confiables cerca d
         )
 
 
-    @bot.message_handler(commands=['help','ayuda'])
+    # ==================== HELP ====================
+
+    @bot.message_handler(commands=['help', 'ayuda'])
     def cmd_help(message):
 
         text = f"""
@@ -68,25 +76,33 @@ Conectamos personas que necesitan servicios con profesionales confiables cerca d
             text,
             parse_mode="HTML"
         )
-        # ==================== ROLE SELECTION ====================
 
-@bot.message_handler(func=lambda message: True, content_types=['text'])
-def handle_main_menu(message):
-    chat_id = message.chat.id
-    text = message.text.strip()
 
-    logger.info(f"[MENU] Texto recibido: {text} | chat_id={chat_id}")
+    # ==================== MENU PRINCIPAL ====================
 
-    if "Necesito un servicio" in text:
-        from handlers.client.flow import start_client_flow
-        start_client_flow(message)
-        return
+    @bot.message_handler(func=lambda message: True, content_types=['text'])
+    def handle_main_menu(message):
 
-    if "Quiero trabajar" in text:
-        from handlers.worker.main import show_worker_menu
-        show_worker_menu(message)
-        return
+        chat_id = message.chat.id
+        text = message.text.strip()
 
-    if "Ayuda" in text:
-        cmd_help(message)
-        return
+        logger.info(f"[MENU] Texto recibido: {text} | chat_id={chat_id}")
+
+        if "Necesito un servicio" in text:
+
+            from handlers.client.flow import start_client_flow
+
+            start_client_flow(message)
+            return
+
+        if "Quiero trabajar" in text:
+
+            from handlers.worker.main import show_worker_menu
+
+            show_worker_menu(message)
+            return
+
+        if "Ayuda" in text:
+
+            cmd_help(message)
+            return
