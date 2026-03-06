@@ -2,6 +2,7 @@ from models.user_state import clear_state, set_state, UserState
 from utils.icons import Icons
 from utils.keyboards import get_role_keyboard
 from config import logger
+from telegram import ReplyKeyboardRemove
 
 
 def register_handlers(bot):
@@ -93,7 +94,6 @@ Conectamos personas que necesitan servicios con profesionales confiables cerca d
         if "Necesito un servicio" in text:
 
             from handlers.client.flow import start_client_flow
-
             start_client_flow(message)
             return
 
@@ -101,7 +101,6 @@ Conectamos personas que necesitan servicios con profesionales confiables cerca d
         if "Quiero trabajar" in text:
 
             from handlers.worker.main import show_worker_menu
-
             show_worker_menu(message)
             return
 
@@ -116,3 +115,7 @@ Conectamos personas que necesitan servicios con profesionales confiables cerca d
             chat_id,
             f"{Icons.INFO} No entendí esa opción. Usá el menú o escribí /start."
         )
+
+
+def remove_keyboard():
+    return ReplyKeyboardRemove()
