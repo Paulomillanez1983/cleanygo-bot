@@ -7,13 +7,25 @@ import sqlite3
 import json
 import time
 import threading
+import os
 
-from config import DB_FILE, logger, get_db_connection
-from utils.icons import Icons
+# Configuración de DB - DEFINIR AQUÍ para evitar import circular
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_FILE = os.path.join(BASE_DIR, "cleanygo_ux.db")
 
 # Lock global para evitar race conditions en inicialización
 _db_init_lock = threading.Lock()
 _db_initialized = False
+
+# Logger simple (importar de config si está disponible, sino usar logging)
+try:
+    from config import logger, Icons
+except ImportError:
+    import logging
+    logger = logging.getLogger("cleanygo-bot")
+    class Icons:
+        SUCCESS = "✅"
+        WARNING = "⚠️"
 
 
 # ==============================
@@ -24,7 +36,6 @@ def init_db():
     """Inicializa la base de datos con migraciones garantizadas."""
     global _db_initialized
     
-    # Evitar inicialización múltiple en el mismo proceso
     if _db_initialized:
         return
     
@@ -33,25 +44,23 @@ def init_db():
             return
             
         try:
-            # Usar una sola conexión para toda la inicialización
             conn = sqlite3.connect(DB_FILE, check_same_thread=False)
             conn.row_factory = sqlite3.Row
-            
             cursor = conn.cursor()
             
-            # ---------- CONFIGURACIÓN SQLITE ----------
+            # Configuración SQLite
             cursor.execute("PRAGMA journal_mode=WAL")
             cursor.execute("PRAGMA foreign_keys=ON")
             cursor.execute("PRAGMA synchronous=NORMAL")
             conn.commit()
             
-            # ---------- MIGRACIONES PRIMERO (antes de crear tablas) ----------
+            # MIGRACIONES PRIMERO (importante!)
             _run_migrations(cursor, conn)
             
-            # ---------- CREAR TABLAS NUEVAS ----------
+            # Crear tablas
             _create_tables(cursor, conn)
             
-            # ---------- ÍNDICES ----------
+            # Crear índices
             _create_indexes(cursor, conn)
             
             conn.commit()
@@ -66,120 +75,110 @@ def init_db():
 
 
 def _run_migrations(cursor, conn):
-    """Ejecuta todas las migraciones necesarias."""
+    """Ejecuta migraciones necesarias antes de crear tablas."""
     try:
-        # Verificar si existe la tabla sessions
-        cursor.execute("""
-            SELECT name FROM sqlite_master 
-            WHERE type='table' AND name='sessions'
-        """)
-        
+        # ========== MIGRAR SESSIONS ==========
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='sessions'")
         if cursor.fetchone():
-            # Tabla existe - verificar y agregar columnas faltantes
             cursor.execute("PRAGMA table_info(sessions)")
             columns = {col[1] for col in cursor.fetchall()}
             
-            migrations = []
-            
+            # Agregar columnas faltantes una por una con manejo de errores
             if "chat_id" not in columns:
-                migrations.append("ALTER TABLE sessions ADD COLUMN chat_id TEXT")
-                logger.info(f"{Icons.WARNING} Migrando: Agregando chat_id a sessions")
-                
-            if "last_activity" not in columns:
-                migrations.append("ALTER TABLE sessions ADD COLUMN last_activity INTEGER")
-                logger.info(f"{Icons.WARNING} Migrando: Agregando last_activity a sessions")
-                
-            if "updated_at" not in columns:
-                migrations.append("ALTER TABLE sessions ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
-                logger.info(f"{Icons.WARNING} Migrando: Agregando updated_at a sessions")
-            
-            # Ejecutar migraciones de sessions
-            for migration in migrations:
                 try:
-                    cursor.execute(migration)
-                    logger.info(f"{Icons.SUCCESS} Ejecutado: {migration}")
+                    cursor.execute("ALTER TABLE sessions ADD COLUMN chat_id TEXT")
+                    logger.info(f"{Icons.WARNING} Migrado: chat_id agregado a sessions")
                 except sqlite3.OperationalError as e:
-                    if "duplicate column" in str(e).lower():
-                        logger.info(f"Columna ya existe, ignorando")
-                    else:
+                    if "duplicate column" not in str(e).lower():
+                        raise
+            
+            if "last_activity" not in columns:
+                try:
+                    cursor.execute("ALTER TABLE sessions ADD COLUMN last_activity INTEGER")
+                    logger.info(f"{Icons.WARNING} Migrado: last_activity agregado a sessions")
+                except sqlite3.OperationalError as e:
+                    if "duplicate column" not in str(e).lower():
+                        raise
+            
+            if "updated_at" not in columns:
+                try:
+                    cursor.execute("ALTER TABLE sessions ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+                    logger.info(f"{Icons.WARNING} Migrado: updated_at agregado a sessions")
+                except sqlite3.OperationalError as e:
+                    if "duplicate column" not in str(e).lower():
                         raise
             
             conn.commit()
-            logger.info(f"{Icons.SUCCESS} Migraciones de sessions completadas")
         
-        # Migrar workers si es necesario
-        _migrate_workers_if_needed(cursor, conn)
-        
+        # ========== MIGRAR WORKERS ==========
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='workers'")
+        if cursor.fetchone():
+            cursor.execute("PRAGMA table_info(workers)")
+            columns = [col[1] for col in cursor.fetchall()]
+            
+            # Si tiene chat_id pero no user_id, es esquema antiguo
+            if columns and "chat_id" in columns and "user_id" not in columns:
+                logger.info(f"{Icons.WARNING} Migrando esquema antiguo workers")
+                
+                # Crear tabla nueva
+                cursor.execute("""
+                    CREATE TABLE workers_new (
+                        user_id INTEGER PRIMARY KEY,
+                        chat_id TEXT UNIQUE,
+                        name TEXT,
+                        nombre TEXT,
+                        phone TEXT,
+                        telefono TEXT,
+                        email TEXT,
+                        address TEXT,
+                        dni_file_id TEXT,
+                        lat REAL,
+                        lon REAL,
+                        is_active BOOLEAN DEFAULT 1,
+                        disponible INTEGER DEFAULT 1,
+                        current_request_id INTEGER DEFAULT NULL,
+                        rating REAL DEFAULT 5.0,
+                        total_jobs INTEGER DEFAULT 0,
+                        last_update INTEGER,
+                        created_at INTEGER DEFAULT (strftime('%s','now'))
+                    )
+                """)
+                
+                # Migrar datos
+                cursor.execute("""
+                    INSERT INTO workers_new 
+                    (user_id, chat_id, nombre, telefono, dni_file_id, lat, lon,
+                     disponible, rating, total_jobs, last_update, created_at)
+                    SELECT 
+                        CAST(chat_id AS INTEGER),
+                        chat_id,
+                        nombre,
+                        telefono,
+                        dni_file_id,
+                        lat,
+                        lon,
+                        disponible,
+                        rating,
+                        total_jobs,
+                        last_update,
+                        created_at
+                    FROM workers
+                """)
+                
+                cursor.execute("DROP TABLE workers")
+                cursor.execute("ALTER TABLE workers_new RENAME TO workers")
+                conn.commit()
+                logger.info(f"{Icons.SUCCESS} Migración workers completada")
+                
     except Exception as e:
         logger.error(f"Error en migraciones: {e}")
         raise
 
 
-def _migrate_workers_if_needed(cursor, conn):
-    """Migra esquema antiguo de workers si es necesario."""
-    try:
-        cursor.execute("PRAGMA table_info(workers)")
-        columns = [col[1] for col in cursor.fetchall()]
-        
-        if columns and "chat_id" in columns and "user_id" not in columns:
-            logger.info(f"{Icons.WARNING} Migrando esquema antiguo workers")
-            
-            cursor.execute("""
-                CREATE TABLE workers_new (
-                    user_id INTEGER PRIMARY KEY,
-                    chat_id TEXT UNIQUE,
-                    name TEXT,
-                    nombre TEXT,
-                    phone TEXT,
-                    telefono TEXT,
-                    email TEXT,
-                    address TEXT,
-                    dni_file_id TEXT,
-                    lat REAL,
-                    lon REAL,
-                    is_active BOOLEAN DEFAULT 1,
-                    disponible INTEGER DEFAULT 1,
-                    current_request_id INTEGER,
-                    rating REAL DEFAULT 5.0,
-                    total_jobs INTEGER DEFAULT 0,
-                    last_update INTEGER,
-                    created_at INTEGER DEFAULT (strftime('%s','now'))
-                )
-            """)
-            
-            cursor.execute("""
-                INSERT INTO workers_new
-                (user_id, chat_id, nombre, telefono, dni_file_id, lat, lon,
-                 disponible, rating, total_jobs, last_update, created_at)
-                SELECT 
-                    CAST(chat_id AS INTEGER),
-                    chat_id,
-                    nombre,
-                    telefono,
-                    dni_file_id,
-                    lat,
-                    lon,
-                    disponible,
-                    rating,
-                    total_jobs,
-                    last_update,
-                    created_at
-                FROM workers
-            """)
-            
-            cursor.execute("DROP TABLE workers")
-            cursor.execute("ALTER TABLE workers_new RENAME TO workers")
-            conn.commit()
-            logger.info(f"{Icons.SUCCESS} Migración workers completada")
-            
-    except Exception as e:
-        logger.error(f"Error migrando workers: {e}")
-
-
 def _create_tables(cursor, conn):
     """Crea todas las tablas si no existen."""
     
-    # ---------- WORKERS ----------
+    # WORKERS
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS workers (
             user_id INTEGER PRIMARY KEY,
@@ -203,7 +202,7 @@ def _create_tables(cursor, conn):
         )
     """)
     
-    # ---------- WORKER SERVICES ----------
+    # WORKER SERVICES
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS worker_services (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -216,7 +215,7 @@ def _create_tables(cursor, conn):
         )
     """)
     
-    # ---------- REQUESTS ----------
+    # REQUESTS
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS requests (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -242,7 +241,7 @@ def _create_tables(cursor, conn):
         )
     """)
     
-    # ---------- RATINGS ----------
+    # RATINGS
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS ratings (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -257,7 +256,7 @@ def _create_tables(cursor, conn):
         )
     """)
     
-    # ---------- SESSIONS (versión completa) ----------
+    # SESSIONS - Versión completa con todas las columnas
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS sessions (
             user_id INTEGER PRIMARY KEY,
@@ -269,7 +268,7 @@ def _create_tables(cursor, conn):
         )
     """)
     
-    # ---------- REQUEST REJECTIONS ----------
+    # REQUEST REJECTIONS
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS request_rejections (
             request_id INTEGER NOT NULL,
@@ -281,7 +280,7 @@ def _create_tables(cursor, conn):
         )
     """)
     
-    # ---------- LOGS ----------
+    # BOT LOGS
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS bot_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -295,8 +294,7 @@ def _create_tables(cursor, conn):
 
 
 def _create_indexes(cursor, conn):
-    """Crea todos los índices."""
-    
+    """Crea índices."""
     indexes = [
         ("idx_requests_status", "requests(status)"),
         ("idx_requests_worker", "requests(worker_id)"),
@@ -311,10 +309,37 @@ def _create_indexes(cursor, conn):
     for idx_name, table_cols in indexes:
         try:
             cursor.execute(f"CREATE INDEX IF NOT EXISTS {idx_name} ON {table_cols}")
-        except sqlite3.OperationalError as e:
-            logger.warning(f"Índice {idx_name} ya existe o error: {e}")
+        except sqlite3.OperationalError:
+            pass  # Ya existe
     
     conn.commit()
+
+
+# ==============================
+# CONNECTION MANAGER
+# ==============================
+
+from contextlib import contextmanager
+
+@contextmanager
+def get_db_connection():
+    """Context manager para conexiones SQLite."""
+    conn = None
+    try:
+        conn = sqlite3.connect(DB_FILE, timeout=30, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA foreign_keys=ON")
+        yield conn
+        conn.commit()
+    except sqlite3.Error as e:
+        if conn:
+            conn.rollback()
+        logger.error(f"[DB ERROR] {e}")
+        raise
+    finally:
+        if conn:
+            conn.close()
 
 
 # ==============================
@@ -343,11 +368,11 @@ def db_execute(query, params=(), fetch_one=False, commit=False):
 
 
 # ==============================
-# SESIONES
+# SESIONES (CORREGIDAS)
 # ==============================
 
 def get_session(chat_id):
-    """Obtiene sesión por chat_id (busca en user_id o chat_id)."""
+    """Obtiene sesión buscando por user_id o chat_id."""
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
@@ -378,7 +403,7 @@ def get_session(chat_id):
 
 
 def set_state(chat_id, state, data=None):
-    """Establece estado de sesión con manejo robusto de chat_id."""
+    """Guarda estado asegurando ambos campos user_id y chat_id."""
     try:
         data_json = json.dumps(data or {})
         timestamp = int(time.time())
@@ -388,7 +413,7 @@ def set_state(chat_id, state, data=None):
         with get_db_connection() as conn:
             cursor = conn.cursor()
             
-            # Verificar si existe registro
+            # Verificar existencia
             cursor.execute(
                 "SELECT user_id FROM sessions WHERE user_id=? OR chat_id=?",
                 (chat_id_int, chat_id_str)
@@ -397,22 +422,22 @@ def set_state(chat_id, state, data=None):
             existing = cursor.fetchone()
             
             if existing:
-                # Actualizar existente - asegurar que ambos campos estén poblados
+                # UPDATE con COALESCE para no perder datos existentes
                 cursor.execute("""
                     UPDATE sessions 
-                    SET state=?, 
-                        data=?, 
-                        last_activity=?, 
+                    SET state=?,
+                        data=?,
+                        last_activity=?,
                         updated_at=CURRENT_TIMESTAMP,
-                        chat_id=COALESCE(chat_id, ?), 
+                        chat_id=COALESCE(chat_id, ?),
                         user_id=COALESCE(user_id, ?)
                     WHERE user_id=? OR chat_id=?
-                """, (state, data_json, timestamp, chat_id_str, chat_id_int, 
+                """, (state, data_json, timestamp, chat_id_str, chat_id_int,
                       chat_id_int, chat_id_str))
             else:
-                # Insertar nuevo
+                # INSERT nuevo
                 cursor.execute("""
-                    INSERT INTO sessions(user_id, chat_id, state, data, last_activity, updated_at)
+                    INSERT INTO sessions (user_id, chat_id, state, data, last_activity, updated_at)
                     VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 """, (chat_id_int, chat_id_str, state, data_json, timestamp))
             
@@ -423,7 +448,7 @@ def set_state(chat_id, state, data=None):
 
 
 def update_data(chat_id, **kwargs):
-    """Actualiza datos de sesión parcialmente."""
+    """Actualiza datos parciales."""
     session = get_session(chat_id) or {"state": None, "data": {}}
     data = session["data"]
     data.update(kwargs)
@@ -445,7 +470,7 @@ def clear_state(chat_id):
 
 
 # ==============================
-# CREAR WORKER AUTOMÁTICO
+# WORKERS
 # ==============================
 
 def ensure_worker_exists(chat_id, nombre="Trabajador"):
@@ -463,8 +488,7 @@ def ensure_worker_exists(chat_id, nombre="Trabajador"):
                 return
             
             cursor.execute("""
-                INSERT INTO workers
-                (user_id, chat_id, name, nombre, is_active, disponible)
+                INSERT INTO workers (user_id, chat_id, name, nombre, is_active, disponible)
                 VALUES (?, ?, ?, ?, 1, 1)
             """, (int(chat_id), str(chat_id), nombre, nombre))
             
@@ -473,3 +497,23 @@ def ensure_worker_exists(chat_id, nombre="Trabajador"):
             
     except Exception as e:
         logger.error(f"Error ensure_worker: {e}")
+
+
+# ==============================
+# CLASE UserSession (para compatibilidad con config.py)
+# ==============================
+
+class UserSession:
+    """Clase compatible con el código existente en config.py"""
+    
+    @staticmethod
+    def get(user_id):
+        return get_session(user_id)
+    
+    @staticmethod
+    def set(user_id, state, data=None):
+        set_state(user_id, state, data)
+    
+    @staticmethod
+    def clear(user_id):
+        clear_state(user_id)
