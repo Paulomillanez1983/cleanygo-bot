@@ -2,7 +2,7 @@ from models.user_state import clear_state, set_state, UserState
 from utils.icons import Icons
 from utils.keyboards import get_role_keyboard
 from config import logger
-from telegram import ReplyKeyboardRemove
+from telebot.types import ReplyKeyboardRemove
 
 
 def register_handlers(bot):
@@ -116,6 +116,8 @@ Conectamos personas que necesitan servicios con profesionales confiables cerca d
             f"{Icons.INFO} No entendí esa opción. Usá el menú o escribí /start."
         )
 
+
+# ==================== UTIL ====================
 
 def remove_keyboard():
     return ReplyKeyboardRemove()
