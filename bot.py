@@ -93,12 +93,16 @@ except Exception as e:
     logger.error(f"[ERROR] Cargando handlers: {e}")
     raise
 
+
+# ==================== CONTAR HANDLERS ====================
+
 try:
-    handlers_count = len(bot._message_handlers)
-except:
+    handlers_count = len(bot.message_handlers)
+except Exception:
     handlers_count = "unknown"
 
 logger.info(f"[INIT] Handlers registrados: {handlers_count}")
+
 
 # ==================== TABLA REQUESTS ====================
 
@@ -119,6 +123,7 @@ except Exception as e:
 
 app = Flask(__name__)
 
+
 @app.route("/")
 @app.route("/health")
 def health():
@@ -138,14 +143,14 @@ def webhook():
 
     try:
 
-        if "application/json" not in request.headers.get("content-type",""):
-            return "invalid", 403
+        # Telegram envía JSON
+        update_json = request.get_json(force=True, silent=True)
 
-        json_string = request.get_data().decode("utf-8")
+        if not update_json:
+            logger.warning("[WEBHOOK] Update vacío")
+            return "no update", 200
 
-        update_dict = json.loads(json_string)
-
-        update = Update.de_json(update_dict)
+        update = Update.de_json(update_json, bot)
 
         bot.process_new_updates([update])
 
