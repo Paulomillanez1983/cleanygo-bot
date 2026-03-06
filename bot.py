@@ -55,13 +55,15 @@ except Exception as e:
 # ==================== CARGAR Y REGISTRAR HANDLERS ====================
 
 try:
-    # Handlers comunes
+
     from handlers.common import register_handlers as register_common_handlers
     register_common_handlers(bot)
+
     logger.info("[INIT] Handlers comunes registrados")
 
-    # Worker flow (registra handlers automáticamente)
+    # Worker flow
     import handlers.worker.flow
+
     logger.info("[INIT] Worker flow cargado")
 
     # DEBUG
@@ -94,13 +96,14 @@ def health():
 @app.route("/webhook", methods=["POST"])
 def webhook():
     try:
-        if "application/json" not in request.headers.get("content-type", ""):
+
+        if not request.is_json:
             return "invalid", 403
 
-        json_string = request.get_data().decode("utf-8")
-        update_dict = json.loads(json_string)
-        update = Update.de_json(update_dict)
-        
+        update_dict = request.get_json()
+
+        update = Update.de_json(update_dict, bot)
+
         bot.process_new_updates([update])
 
     except Exception as e:
@@ -115,25 +118,38 @@ def webhook():
 domain = os.environ.get("RAILWAY_PUBLIC_DOMAIN")
 
 if domain:
+
     webhook_url = f"https://{domain}/webhook"
-    
+
     try:
+
         current = bot.get_webhook_info()
-        
+
         if current.url != webhook_url:
+
             logger.info("[INIT] Configurando webhook...")
+
             bot.remove_webhook(drop_pending_updates=True)
             time.sleep(1)
-            bot.set_webhook(url=webhook_url, drop_pending_updates=True)
+
+            bot.set_webhook(
+                url=webhook_url,
+                drop_pending_updates=True
+            )
+
             logger.info(f"[INIT] Webhook configurado: {webhook_url}")
+
         else:
+
             logger.info(f"[INIT] Webhook ya configurado: {webhook_url}")
 
     except Exception as e:
         logger.error(f"[ERROR] Configurando webhook: {e}")
 
 else:
+
     logger.error("[ERROR] RAILWAY_PUBLIC_DOMAIN no definido")
+
 
 logger.info("[INIT] Bot listo para recibir webhooks")
 
@@ -141,5 +157,11 @@ logger.info("[INIT] Bot listo para recibir webhooks")
 # ==================== RUN ====================
 
 if __name__ == "__main__":
+
     port = int(os.environ.get("PORT", 8080))
-    app.run(host="0.0.0.0", port=port, debug=False)
+
+    app.run(
+        host="0.0.0.0",
+        port=port,
+        debug=False
+    )
