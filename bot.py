@@ -54,28 +54,13 @@ except Exception as e:
 
 # ==================== CARGAR Y REGISTRAR HANDLERS ====================
 
-
 try:
-    # Importar y REGISTRAR handlers comunes
-    from handlers.common import register_handlers as register_common_handlers
-    register_common_handlers(bot)
-    logger.info("[INIT] Handlers comunes registrados")
-try:
-    # Importar y REGISTRAR los handlers de common
+    # Handlers comunes
     from handlers.common import register_handlers as register_common_handlers
     register_common_handlers(bot)
     logger.info("[INIT] Handlers comunes registrados")
 
-    # IMPORTAR WORKER FLOW (registra handlers automáticamente)
-    import handlers.worker.flow
-    logger.info("[INIT] Worker flow cargado")
-
-    # DEBUG
-    logger.info(f"[DEBUG] Total message handlers: {len(bot.message_handlers)}")
-    logger.info(f"[DEBUG] Total callback handlers: {len(bot.callback_query_handlers)}")
-
-except Exception as e:
-    # IMPORTAR WORKER FLOW (registra handlers automáticamente)
+    # Worker flow (registra handlers automáticamente)
     import handlers.worker.flow
     logger.info("[INIT] Worker flow cargado")
 
