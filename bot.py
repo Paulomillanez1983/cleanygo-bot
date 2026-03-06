@@ -14,6 +14,7 @@ from flask import Flask, jsonify, request
 
 from config import inject_bot, init_db as config_init_db, logger
 
+
 # ==================== CONFIG ====================
 
 TOKEN = os.getenv("BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
@@ -22,6 +23,7 @@ if not TOKEN:
     raise RuntimeError("BOT_TOKEN no definido en variables de entorno")
 
 logger.info(f"[INIT] Token cargado: {TOKEN[:10]}...")
+
 
 # ==================== CREAR BOT ====================
 
@@ -33,10 +35,12 @@ bot = TeleBot(
 
 logger.info(f"[INIT] Bot creado: {id(bot)}")
 
+
 # ==================== INYECTAR BOT ====================
 
 inject_bot(bot)
 logger.info("[INIT] Bot inyectado en config")
+
 
 # ==================== DB ====================
 
@@ -46,11 +50,13 @@ try:
 except Exception as e:
     logger.error(f"[DB ERROR] {e}")
 
+
 # ==================== CARGAR HANDLERS ====================
 
 try:
 
     from handlers.common import register_handlers as register_common
+
     from handlers.client.flow import register_handlers as register_client_flow
     from handlers.client.search import register_handlers as register_client_search
     from handlers.client.callbacks import register_handlers as register_client_callbacks
@@ -61,6 +67,7 @@ try:
     from handlers.worker.main import register_handlers as register_worker_main
 
     register_common(bot)
+
     register_client_flow(bot)
     register_client_search(bot)
     register_client_callbacks(bot)
@@ -77,9 +84,11 @@ except Exception as e:
     logger.error(f"[ERROR] Cargando handlers: {e}")
     raise
 
+
 # ==================== FLASK ====================
 
 app = Flask(__name__)
+
 
 @app.route("/")
 @app.route("/health")
@@ -157,6 +166,7 @@ else:
     logger.error("[ERROR] RAILWAY_PUBLIC_DOMAIN no definido. Webhook NO configurado.")
 
 logger.info("[INIT] Bot listo para recibir webhooks")
+
 
 # ==================== RUN LOCAL ====================
 
