@@ -50,7 +50,6 @@ def register_handlers(bot):
 def cmd_start(message):
 
     chat_id = message.chat.id
-
     clear_state(chat_id)
 
     welcome_text = f"""
@@ -80,7 +79,6 @@ Conectamos personas que necesitan servicios con profesionales confiables cerca d
 def cmd_cancel(message):
 
     chat_id = message.chat.id
-
     clear_state(chat_id)
 
     send_safe(
