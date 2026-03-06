@@ -55,35 +55,23 @@ except Exception as e:
 
 try:
 
-    from handlers.common import register_handlers as register_common
+    import handlers.common
 
-    from handlers.client.flow import register_handlers as register_client_flow
-    from handlers.client.search import register_handlers as register_client_search
-    from handlers.client.callbacks import register_handlers as register_client_callbacks
+    import handlers.client.flow
+    import handlers.client.search
+    import handlers.client.callbacks
 
-    from handlers.worker.flow import register_handlers as register_worker_flow
-    from handlers.worker.jobs import register_handlers as register_worker_jobs
-    from handlers.worker.profile import register_handlers as register_worker_profile
-    from handlers.worker.main import register_handlers as register_worker_main
+    import handlers.worker.flow
+    import handlers.worker.jobs
+    import handlers.worker.profile
+    import handlers.worker.main
 
-    register_common(bot)
-
-    register_client_flow(bot)
-    register_client_search(bot)
-    register_client_callbacks(bot)
-
-    register_worker_flow(bot)
-    register_worker_jobs(bot)
-    register_worker_profile(bot)
-    register_worker_main(bot)
-
-    logger.info("[INIT] Handlers registrados correctamente")
+    logger.info("[INIT] Handlers cargados correctamente")
 
 except Exception as e:
 
     logger.error(f"[ERROR] Cargando handlers: {e}")
     raise
-
 
 # ==================== FLASK ====================
 
