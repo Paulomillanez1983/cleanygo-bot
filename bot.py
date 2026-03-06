@@ -7,6 +7,7 @@ Webhook + handlers + DB + logging
 import os
 import time
 import json
+import traceback
 
 from telebot import TeleBot
 from telebot.types import Update
@@ -51,27 +52,52 @@ except Exception as e:
     logger.error(f"[DB ERROR] {e}")
 
 
-# ==================== CARGAR HANDLERS ====================
+# ==================== CARGAR Y REGISTRAR HANDLERS ====================
 
 try:
-
-    import handlers.common
-
-    import handlers.client.flow
-    import handlers.client.search
-    import handlers.client.callbacks
-
-    import handlers.worker.flow
-    import handlers.worker.jobs
-    import handlers.worker.profile
-    import handlers.worker.main
-
-    logger.info("[INIT] Handlers cargados correctamente")
+    # Importar y REGISTRAR los handlers de common
+    from handlers.common import register_handlers as register_common_handlers
+    register_common_handlers(bot)
+    logger.info("[INIT] Handlers comunes registrados")
+    
+    # Importar otros handlers (si tienen función de registro similar)
+    # Descomenta y adapta según tus otros handlers
+    
+    # from handlers.client.flow import register_handlers as register_client_flow
+    # register_client_flow(bot)
+    
+    # from handlers.client.search import register_handlers as register_client_search
+    # register_client_search(bot)
+    
+    # from handlers.client.callbacks import register_handlers as register_client_callbacks
+    # register_client_callbacks(bot)
+    
+    # from handlers.worker.flow import register_handlers as register_worker_flow
+    # register_worker_flow(bot)
+    
+    # from handlers.worker.jobs import register_handlers as register_worker_jobs
+    # register_worker_jobs(bot)
+    
+    # from handlers.worker.profile import register_handlers as register_worker_profile
+    # register_worker_profile(bot)
+    
+    # from handlers.worker.main import register_handlers as register_worker_main
+    # register_worker_main(bot)
+    
+    # DEBUG: Ver handlers registrados
+    logger.info(f"[DEBUG] Total message handlers: {len(bot.message_handlers)}")
+    logger.info(f"[DEBUG] Total callback handlers: {len(bot.callback_query_handlers)}")
+    
+    # Listar comandos registrados
+    for i, handler in enumerate(bot.message_handlers):
+        if hasattr(handler, 'filters'):
+            logger.info(f"[DEBUG] Handler {i}: {handler.filters}")
 
 except Exception as e:
-
     logger.error(f"[ERROR] Cargando handlers: {e}")
+    logger.error(traceback.format_exc())
     raise
+
 
 # ==================== FLASK ====================
 
@@ -81,7 +107,6 @@ app = Flask(__name__)
 @app.route("/")
 @app.route("/health")
 def health():
-
     return jsonify({
         "status": "healthy",
         "bot": "online",
@@ -94,28 +119,18 @@ def health():
 @app.route("/webhook", methods=["POST"])
 def webhook():
     try:
-        logger.info(f"[WEBHOOK] Headers: {dict(request.headers)}")
-        logger.info(f"[WEBHOOK] Raw data: {request.get_data()}")
-        
         if "application/json" not in request.headers.get("content-type", ""):
-            logger.warning("[WEBHOOK] Content-type inválido")
-            return "invalid content-type", 403
+            return "invalid", 403
 
         json_string = request.get_data().decode("utf-8")
-        logger.info(f"[WEBHOOK] JSON string: {json_string[:200]}...")
-
         update_dict = json.loads(json_string)
-        logger.info(f"[WEBHOOK] Dict parsed: {update_dict}")
-
         update = Update.de_json(update_dict)
-        logger.info(f"[WEBHOOK] Update object: {update}")
-
+        
         bot.process_new_updates([update])
-        logger.info("[WEBHOOK] Updates procesadas")
 
     except Exception as e:
         logger.error(f"[WEBHOOK ERROR] {e}", exc_info=True)
-        return str(e), 500  # Devolver error para verlo en logs
+        return str(e), 500
 
     return "", 200
 
@@ -125,51 +140,31 @@ def webhook():
 domain = os.environ.get("RAILWAY_PUBLIC_DOMAIN")
 
 if domain:
-
     webhook_url = f"https://{domain}/webhook"
-
+    
     try:
-
         current = bot.get_webhook_info()
-
+        
         if current.url != webhook_url:
-
             logger.info("[INIT] Configurando webhook...")
-
             bot.remove_webhook(drop_pending_updates=True)
-
             time.sleep(1)
-
-            bot.set_webhook(
-                url=webhook_url,
-                drop_pending_updates=True
-            )
-
+            bot.set_webhook(url=webhook_url, drop_pending_updates=True)
             logger.info(f"[INIT] Webhook configurado: {webhook_url}")
-
         else:
-
             logger.info(f"[INIT] Webhook ya configurado: {webhook_url}")
 
     except Exception as e:
-
         logger.error(f"[ERROR] Configurando webhook: {e}")
 
 else:
-
-    logger.error("[ERROR] RAILWAY_PUBLIC_DOMAIN no definido. Webhook NO configurado.")
+    logger.error("[ERROR] RAILWAY_PUBLIC_DOMAIN no definido")
 
 logger.info("[INIT] Bot listo para recibir webhooks")
 
 
-# ==================== RUN LOCAL ====================
+# ==================== RUN ====================
 
 if __name__ == "__main__":
-
     port = int(os.environ.get("PORT", 8080))
-
-    app.run(
-        host="0.0.0.0",
-        port=port,
-        debug=False
-    )
+    app.run(host="0.0.0.0", port=port, debug=False)
