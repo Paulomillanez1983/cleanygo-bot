@@ -415,3 +415,22 @@ def __getattr__(name):
         return _bot_instance
 
     raise AttributeError(name)
+# =========================
+# NOTIFICACIONES
+# =========================
+
+async def notify_client(chat_id: int, message: str):
+
+    try:
+
+        bot = get_bot()
+
+        await bot.send_message(
+            chat_id=chat_id,
+            text=message
+        )
+
+        logger.info(f"📩 Notificación enviada a cliente {chat_id}")
+
+    except Exception as e:
+        logger.error(f"❌ Error enviando notificación: {e}")
