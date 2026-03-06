@@ -12,8 +12,8 @@ from utils.keyboards import (
     get_service_selector, get_time_selector, get_custom_time_selector,
     get_location_keyboard, get_confirmation_keyboard, get_role_keyboard
 )
-from handlers.common import send_safe, edit_safe, delete_safe, remove_keyboard
-from telebot import types
+from utils.telegram_safe import send_safe, edit_safe, delete_safe
+from handlers.common import remove_keyboardfrom telebot import types
 import logging
 
 # ✅ CORREGIDO: Importar desde requests_db en lugar de request_service
