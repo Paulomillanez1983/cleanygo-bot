@@ -5,9 +5,51 @@ from config import logger
 from telebot.types import ReplyKeyboardRemove
 
 
+# ================= SAFE MESSAGES =================
+
+def send_safe(bot, chat_id, text, reply_markup=None, parse_mode="HTML"):
+    try:
+        return bot.send_message(
+            chat_id,
+            text,
+            reply_markup=reply_markup,
+            parse_mode=parse_mode
+        )
+    except Exception as e:
+        logger.error(f"[SEND ERROR] {e} | chat_id={chat_id}")
+        return None
+
+
+def edit_safe(bot, chat_id, message_id, text, reply_markup=None):
+    try:
+        return bot.edit_message_text(
+            text,
+            chat_id,
+            message_id,
+            reply_markup=reply_markup,
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        logger.error(f"[EDIT ERROR] {e} | message_id={message_id}")
+        return None
+
+
+def delete_safe(bot, chat_id, message_id):
+    try:
+        bot.delete_message(chat_id, message_id)
+    except Exception as e:
+        logger.error(f"[DELETE ERROR] {e} | message_id={message_id}")
+
+
+def remove_keyboard():
+    return ReplyKeyboardRemove()
+
+
+# ================= HANDLERS =================
+
 def register_handlers(bot):
 
-    # ==================== START ====================
+    # ================= START =================
 
     @bot.message_handler(commands=["start"])
     def cmd_start(message):
@@ -35,7 +77,7 @@ Conectamos personas que necesitan servicios con profesionales confiables cerca d
 
         logger.info(f"[START] Usuario inició bot | chat_id={chat_id}")
 
-    # ==================== CANCEL ====================
+    # ================= CANCEL =================
 
     @bot.message_handler(commands=["cancel"])
     def cmd_cancel(message):
@@ -51,7 +93,7 @@ Conectamos personas que necesitan servicios con profesionales confiables cerca d
 
         logger.info(f"[CANCEL] Flujo cancelado | chat_id={chat_id}")
 
-    # ==================== HELP ====================
+    # ================= HELP =================
 
     @bot.message_handler(commands=["help", "ayuda"])
     def cmd_help(message):
@@ -80,7 +122,7 @@ Conectamos personas que necesitan servicios con profesionales confiables cerca d
             parse_mode="HTML"
         )
 
-    # ==================== MENU PRINCIPAL ====================
+    # ================= MENU PRINCIPAL =================
 
     @bot.message_handler(func=lambda message: True, content_types=["text"])
     def handle_main_menu(message):
@@ -92,21 +134,18 @@ Conectamos personas que necesitan servicios con profesionales confiables cerca d
 
         # Cliente
         if "Necesito un servicio" in text:
-
             from handlers.client.flow import start_client_flow
             start_client_flow(message)
             return
 
         # Trabajador
         if "Quiero trabajar" in text:
-
             from handlers.worker.main import show_worker_menu
             show_worker_menu(message)
             return
 
         # Ayuda
         if "Ayuda" in text:
-
             cmd_help(message)
             return
 
@@ -115,9 +154,3 @@ Conectamos personas que necesitan servicios con profesionales confiables cerca d
             chat_id,
             f"{Icons.INFO} No entendí esa opción. Usá el menú o escribí /start."
         )
-
-
-# ==================== UTIL ====================
-
-def remove_keyboard():
-    return ReplyKeyboardRemove()
