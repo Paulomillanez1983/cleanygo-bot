@@ -34,6 +34,16 @@ from handlers.worker.main import show_worker_menu
 
 logger = logging.getLogger(__name__)
 
+# ==================== REGISTRO HANDLERS ====================
+
+def register_handlers(_bot):
+    """
+    Compatibilidad con bot.py.
+    No hace nada porque los handlers ya están registrados
+    mediante decoradores usando el bot global de config.
+    """
+    logger.info("[CLIENT FLOW] Handlers cargados correctamente")
+
 # ==================== FUNCIONES AUXILIARES ====================
 
 def debug_session(chat_id: str, label: str):
@@ -47,6 +57,7 @@ def debug_session(chat_id: str, label: str):
 
 
 def save_state_and_data(chat_id: str, state: UserState, data_updates: dict = None):
+
     chat_id = str(chat_id)
 
     if data_updates:
@@ -54,11 +65,14 @@ def save_state_and_data(chat_id: str, state: UserState, data_updates: dict = Non
             update_data(chat_id, **{key: value})
 
     set_state(chat_id, state)
+
     logger.info(f"[STATE] chat_id={chat_id} -> {state.value}")
 
 
 def get_service_display(service_id: str, with_price: bool = False) -> str:
+
     svc = SERVICES.get(service_id, {})
+
     text = f"{svc.get('icon','🔹')} <b>{svc.get('name', service_id)}</b>"
 
     if with_price:
@@ -72,10 +86,12 @@ def get_service_display(service_id: str, with_price: bool = False) -> str:
 
 @bot.message_handler(func=lambda m: m.text and ("Necesito" in m.text or "servicio" in m.text.lower()))
 def handle_client_start(message):
+
     start_client_flow(message.chat.id)
 
 
 def start_client_flow(chat_id):
+
     chat_id = str(chat_id)
 
     from models.user_state import clear_state
@@ -88,6 +104,7 @@ def start_client_flow(chat_id):
     markup = types.InlineKeyboardMarkup(row_width=1)
 
     for svc_id, svc in SERVICES.items():
+
         markup.add(
             types.InlineKeyboardButton(
                 f"{svc['icon']} {svc['name']}\n{svc['desc']}",
@@ -124,7 +141,13 @@ def handle_client_service_selection(call):
         f"Servicio: {get_service_display(service_id)}"
     )
 
-    edit_safe(bot, chat_id, call.message.message_id, text, get_time_selector())
+    edit_safe(
+        bot,
+        chat_id,
+        call.message.message_id,
+        text,
+        get_time_selector()
+    )
 
 
 # ==================== TIEMPO ====================
@@ -177,7 +200,12 @@ Enviá tu ubicación.
 
     delete_safe(bot, chat_id, message_id)
 
-    send_safe(bot, chat_id, text, get_location_keyboard())
+    send_safe(
+        bot,
+        chat_id,
+        text,
+        get_location_keyboard()
+    )
 
 
 def _is_client_sharing_location(message):
@@ -217,7 +245,12 @@ Precio: ${service_info['price']}
 Hora: {time_str} {period}
 """
 
-    send_safe(bot, chat_id, text, get_confirmation_keyboard())
+    send_safe(
+        bot,
+        chat_id,
+        text,
+        get_confirmation_keyboard()
+    )
 
 
 # ==================== CONFIRMACIÓN ====================
@@ -319,15 +352,18 @@ Hora: {hora}
         markup
     )
 
-    show_worker_menu(worker_id, {
-        "request_id": request_id,
-        "service_id": service_id,
-        "hora": hora,
-        "client_id": chat_id,
-        "lat": lat,
-        "lon": lon,
-        "price": price
-    })
+    show_worker_menu(
+        worker_id,
+        {
+            "request_id": request_id,
+            "service_id": service_id,
+            "hora": hora,
+            "client_id": chat_id,
+            "lat": lat,
+            "lon": lon,
+            "price": price
+        }
+    )
 
     edit_safe(
         bot,
@@ -374,7 +410,10 @@ def handle_client_reject_worker(call):
 
     request_id = int(call.data.split(":")[1])
 
-    cancel_request(request_id, reason="Cliente rechazó")
+    cancel_request(
+        request_id,
+        reason="Cliente rechazó"
+    )
 
     send_safe(
         bot,
