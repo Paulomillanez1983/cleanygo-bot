@@ -143,9 +143,9 @@ Conectamos personas que necesitan servicios con profesionales confiables cerca d
 
         # ================= TRABAJADOR =================
 
-        if "quiero trabajar" in text:
-            from handlers.worker.main import show_worker_menu
-            show_worker_menu(message.chat.id)   # ✅ CORREGIDO
+        if "trabajar" in text:
+            from handlers.worker.flow import start_worker_flow
+            start_worker_flow(message.chat.id)
             return
 
         # ================= AYUDA =================
