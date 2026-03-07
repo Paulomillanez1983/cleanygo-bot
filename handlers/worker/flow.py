@@ -317,8 +317,8 @@ def _process_name_input(message, chat_id):
         return
     
     # Usar UserSession
-    UserSession.update(chat_id, worker_name=text)
-    UserSession.set(chat_id, WorkerStates.ENTERING_PHONE)
+UserSession.update(chat_id, worker_name=text)
+UserSession.update(chat_id, state=WorkerStates.ENTERING_PHONE)
     
     bot.send_message(
         chat_id,
@@ -340,9 +340,9 @@ def _process_phone_input(message, chat_id):
         bot.send_message(chat_id, "❌ Muy corto. Incluí código de área:")
         return
     
-    UserSession.update(chat_id, worker_phone=phone)
-    UserSession.set(chat_id, WorkerStates.ENTERING_DNI)
-    
+UserSession.update(chat_id, worker_phone=phone)
+UserSession.update(chat_id, state=WorkerStates.ENTERING_DNI)
+
     formatted = f"{phone[:2]} {phone[2:6]}-{phone[6:]}" if len(phone) >= 8 else phone
     
     bot.send_message(
@@ -367,7 +367,7 @@ def _process_dni_input(message, chat_id):
     
     try:
         _save_worker_to_db(chat_id, dni)
-        UserSession.set(chat_id, WorkerStates.SHARING_LOCATION)
+        UserSession.update(chat_id, state=WorkerStates.SHARING_LOCATION)
         _request_location(chat_id)
     except Exception as e:
         logger.error(f"[DNI ERROR] {chat_id}: {e}")
