@@ -5,6 +5,7 @@ from enum import Enum
 from config import DB_FILE, logger
 
 # ==================== ENUM ESTADOS ====================
+
 class UserState(Enum):
     IDLE = "idle"
     SELECTING_ROLE = "selecting_role"
@@ -28,48 +29,73 @@ class UserState(Enum):
     JOB_IN_PROGRESS = "job_in_progress"
 
 
-# ==================== SESIONES CON SQLITE ====================
+# ==================== TABLA SESIONES ====================
+
 def init_sessions_table():
     """Crear tabla sessions si no existe"""
     with sqlite3.connect(DB_FILE) as conn:
         cursor = conn.cursor()
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS sessions (
-                chat_id TEXT PRIMARY KEY,
-                state TEXT,
-                data TEXT,
-                last_activity INTEGER
-            )
-        ''')
+
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS sessions (
+            chat_id TEXT PRIMARY KEY,
+            state TEXT,
+            data TEXT,
+            last_activity INTEGER
+        )
+        """)
+
         conn.commit()
+
     logger.info("✅ Tabla sessions inicializada")
 
 
+# ==================== OBTENER SESION ====================
+
 def get_session(chat_id: str) -> dict:
-    """Obtener sesión de SQLite"""
+    """Obtener sesión desde SQLite"""
+
     chat_id = str(chat_id)
+
     with sqlite3.connect(DB_FILE) as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT state, data FROM sessions WHERE chat_id = ?", (chat_id,))
+
+        cursor.execute(
+            "SELECT state, data FROM sessions WHERE chat_id = ?",
+            (chat_id,)
+        )
+
         row = cursor.fetchone()
+
         if row:
+
             state, data_json = row
+
             try:
                 data = json.loads(data_json) if data_json else {}
+
             except Exception as e:
                 logger.error(f"[DB] Error parsing JSON session for {chat_id}: {e}")
                 data = {}
-            return {"state": state, "data": data}
-        else:
-            return {"state": UserState.IDLE.value, "data": {}}
 
+            return {
+                "state": state,
+                "data": data
+            }
+
+        return {
+            "state": UserState.IDLE.value,
+            "data": {}
+        }
+
+
+# ==================== GUARDAR ESTADO ====================
 
 def set_state(chat_id: str, state: UserState, data: dict = None):
     """
-    Guardar o actualizar sesión en SQLite.
-    
-    Si data=None, preserva los datos existentes.
+    Guardar o actualizar sesión en SQLite
     """
+
     chat_id = str(chat_id)
     timestamp = int(time.time())
 
@@ -81,49 +107,78 @@ def set_state(chat_id: str, state: UserState, data: dict = None):
 
     with sqlite3.connect(DB_FILE) as conn:
         cursor = conn.cursor()
-        cursor.execute('''
-            INSERT INTO sessions(chat_id, state, data, last_activity)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(chat_id) DO UPDATE SET
-                state=excluded.state,
-                data=excluded.data,
-                last_activity=excluded.last_activity
-        ''', (chat_id, state.value, data_json, timestamp))
+
+        # INSERT OR REPLACE evita problemas con ON CONFLICT
+        cursor.execute("""
+        INSERT OR REPLACE INTO sessions
+        (chat_id, state, data, last_activity)
+        VALUES (?, ?, ?, ?)
+        """, (
+            chat_id,
+            state.value,
+            data_json,
+            timestamp
+        ))
+
         conn.commit()
 
-    logger.info(f"[DB] set_state: {chat_id} -> {state.value}, keys={list(data.keys())}")
+    logger.info(
+        f"[DB] set_state: {chat_id} -> {state.value}, keys={list(data.keys())}"
+    )
 
+
+# ==================== ACTUALIZAR DATA ====================
 
 def update_data(chat_id: str, **kwargs):
-    """Actualizar solo el diccionario de datos de la sesión"""
+
     chat_id = str(chat_id)
+
     session = get_session(chat_id)
     session_data = session.get("data", {})
+
     session_data.update(kwargs)
 
     current_state_str = session.get("state", UserState.IDLE.value)
+
     try:
         current_state = UserState(current_state_str)
+
     except ValueError:
         current_state = UserState.IDLE
 
     set_state(chat_id, current_state, session_data)
 
 
+# ==================== OBTENER DATO ====================
+
 def get_data(chat_id: str, key: str, default=None):
-    """Obtener dato específico de la sesión"""
+
     chat_id = str(chat_id)
+
     session = get_session(chat_id)
+
     result = session.get("data", {}).get(key, default)
+
     logger.info(f"[DB] get_data: {chat_id}.{key} = {result}")
+
     return result
 
 
+# ==================== BORRAR SESION ====================
+
 def clear_state(chat_id: str):
-    """Eliminar sesión de SQLite"""
+
     chat_id = str(chat_id)
+
     with sqlite3.connect(DB_FILE) as conn:
+
         cursor = conn.cursor()
-        cursor.execute("DELETE FROM sessions WHERE chat_id = ?", (chat_id,))
+
+        cursor.execute(
+            "DELETE FROM sessions WHERE chat_id = ?",
+            (chat_id,)
+        )
+
         conn.commit()
+
     logger.info(f"[DB] clear_state: {chat_id}")
