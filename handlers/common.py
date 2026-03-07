@@ -1,22 +1,8 @@
-from config import logger
+from config import logger, UserSession
 from models.states import UserState
 from utils.icons import Icons
 from utils.keyboards import get_role_keyboard
 from telebot.types import ReplyKeyboardRemove
-
-
-# ================= USER STATE (MEMORIA) =================
-
-user_states = {}
-
-def set_state(chat_id, state):
-    user_states[chat_id] = state
-
-def get_state(chat_id):
-    return user_states.get(chat_id, UserState.IDLE.value)
-
-def clear_state(chat_id):
-    user_states.pop(chat_id, None)
 
 
 # ================= SAFE MESSAGES =================
@@ -69,7 +55,9 @@ def register_handlers(bot):
     def cmd_start(message):
 
         chat_id = message.chat.id
-        clear_state(chat_id)
+        
+        # Usar UserSession (database) en lugar de user_states (memoria)
+        UserSession.clear(chat_id)
 
         wave_icon = getattr(Icons, "WAVE", "👋")
 
@@ -88,7 +76,8 @@ Conectamos personas que necesitan servicios con profesionales confiables cerca d
             reply_markup=get_role_keyboard()
         )
 
-        set_state(chat_id, UserState.SELECTING_ROLE.value)
+        # Usar UserSession.set() en lugar de set_state()
+        UserSession.set(chat_id, UserState.SELECTING_ROLE.value)
 
         logger.info(f"[START] Usuario inició bot | chat_id={chat_id}")
 
@@ -99,7 +88,9 @@ Conectamos personas que necesitan servicios con profesionales confiables cerca d
     def cmd_cancel(message):
 
         chat_id = message.chat.id
-        clear_state(chat_id)
+        
+        # Usar UserSession.clear()
+        UserSession.clear(chat_id)
 
         send_safe(
             bot,
@@ -137,12 +128,17 @@ Conectamos personas que necesitan servicios con profesionales confiables cerca d
 
 
     # ================= MENU PRINCIPAL =================
+    # CORREGIDO: Usa UserSession.get() y verifica estado SELECTING_ROLE
 
     @bot.message_handler(
-        func=lambda message: get_state(message.chat.id) == UserState.SELECTING_ROLE.value,
+        func=lambda message: UserSession.get(message.chat.id).get("state") == UserState.SELECTING_ROLE.value,
         content_types=["text"]
     )
     def handle_main_menu(message):
+        """
+        Handler del menú principal.
+        Solo se activa cuando el estado es SELECTING_ROLE (después de /start).
+        """
 
         chat_id = message.chat.id
         text = message.text.strip().lower()
