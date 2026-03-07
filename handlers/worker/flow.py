@@ -81,16 +81,25 @@ def start_worker_flow(chat_id):
 
 # ==================== HANDLER PARA BOTÓN "TRABAJAR" ====================
 
-@bot.message_handler(func=lambda m: m.text and "trabajar" in m.text.lower())
+from models.states import UserState
+
+@bot.message_handler(
+    func=lambda m: (
+        m.text
+        and "trabajar" in m.text.lower()
+        and UserSession.get(m.chat.id).get("state") == UserState.SELECTING_ROLE.value
+    )
+)
 def handle_worker_start(message):
     """
     Handler para cuando el usuario toca el botón "💼 Quiero trabajar".
-    Llama a start_worker_flow() internamente.
+    SOLO funciona cuando el usuario está en el menú principal.
     """
     chat_id = message.chat.id
-    logger.info(f"[HANDLER] Activado por botón | chat_id={chat_id}")
-    start_worker_flow(chat_id)
 
+    logger.info(f"[HANDLER] Botón trabajar | chat_id={chat_id}")
+
+    start_worker_flow(chat_id)
 
 # ==================== SELECTOR DE SERVICIOS ====================
 
