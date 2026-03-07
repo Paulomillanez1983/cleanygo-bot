@@ -1,9 +1,22 @@
 from config import logger
-from models.user_state import clear_state, set_state, get_state
 from models.states import UserState
 from utils.icons import Icons
 from utils.keyboards import get_role_keyboard
 from telebot.types import ReplyKeyboardRemove
+
+
+# ================= USER STATE (MEMORIA) =================
+
+user_states = {}
+
+def set_state(chat_id, state):
+    user_states[chat_id] = state
+
+def get_state(chat_id):
+    return user_states.get(chat_id, UserState.IDLE.value)
+
+def clear_state(chat_id):
+    user_states.pop(chat_id, None)
 
 
 # ================= SAFE MESSAGES =================
@@ -133,7 +146,6 @@ Conectamos personas que necesitan servicios con profesionales confiables cerca d
 
         state = get_state(chat_id)
 
-        # 🚫 SI EL USUARIO ESTÁ EN OTRO FLUJO, IGNORAR MENÚ
         if state != UserState.SELECTING_ROLE.value:
             logger.info(
                 f"[MENU] Ignorado por flujo activo | state={state} | chat_id={chat_id}"
@@ -142,27 +154,19 @@ Conectamos personas que necesitan servicios con profesionales confiables cerca d
 
         logger.info(f"[MENU] Texto recibido: {text} | chat_id={chat_id}")
 
-        # ================= CLIENTE =================
-
         if "necesito un servicio" in text:
             from handlers.client.flow import start_client_flow
             start_client_flow(message)
             return
-
-        # ================= TRABAJADOR =================
 
         if "trabajar" in text:
             from handlers.worker.flow import start_worker_flow
             start_worker_flow(chat_id)
             return
 
-        # ================= AYUDA =================
-
         if "ayuda" in text:
             cmd_help(message)
             return
-
-        # ================= DESCONOCIDO =================
 
         send_safe(
             bot,
