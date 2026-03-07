@@ -1,8 +1,7 @@
-from config import clear_state, set_state
+from config import clear_state, set_state, logger
 from models.states import UserState
 from utils.icons import Icons
 from utils.keyboards import get_role_keyboard
-from config import logger
 from telebot.types import ReplyKeyboardRemove
 
 
@@ -58,8 +57,10 @@ def register_handlers(bot):
         chat_id = message.chat.id
         clear_state(chat_id)
 
+        wave_icon = getattr(Icons, "WAVE", "👋")
+
         welcome_text = f"""
-{Icons.WAVE} <b>¡Bienvenido a CleanyGo!</b>
+{wave_icon} <b>¡Bienvenido a CleanyGo!</b>
 
 Conectamos personas que necesitan servicios con profesionales confiables cerca de ti.
 
@@ -73,7 +74,7 @@ Conectamos personas que necesitan servicios con profesionales confiables cerca d
             reply_markup=get_role_keyboard()
         )
 
-        set_state(chat_id, UserState.SELECTING_ROLE)
+        set_state(chat_id, UserState.SELECTING_ROLE.value)
 
         logger.info(f"[START] Usuario inició bot | chat_id={chat_id}")
 
@@ -157,4 +158,4 @@ Conectamos personas que necesitan servicios con profesionales confiables cerca d
             bot,
             chat_id,
             f"{Icons.INFO} No entendí esa opción. Usá el menú o escribí /start."
-        )
+            )
