@@ -1,4 +1,4 @@
-from config import clear_state, set_state, logger
+from config import clear_state, set_state, get_state, logger
 from models.states import UserState
 from utils.icons import Icons
 from utils.keyboards import get_role_keyboard
@@ -129,6 +129,15 @@ Conectamos personas que necesitan servicios con profesionales confiables cerca d
 
         chat_id = message.chat.id
         text = message.text.strip().lower()
+
+        state = get_state(chat_id)
+
+        # 🚫 SI EL USUARIO ESTÁ EN OTRO FLUJO, IGNORAR MENÚ
+        if state != UserState.SELECTING_ROLE.value:
+            logger.info(
+                f"[MENU] Ignorado por flujo activo | state={state} | chat_id={chat_id}"
+            )
+            return
 
         logger.info(f"[MENU] Texto recibido: {text} | chat_id={chat_id}")
 
