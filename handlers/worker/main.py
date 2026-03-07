@@ -8,7 +8,16 @@ from config import get_bot, notify_client, get_db_connection
 from handlers.common import send_safe, edit_safe
 from utils.icons import Icons
 import logging
+def start_worker_flow(chat_id):
+    """
+    Inicia el flujo de trabajador cuando presiona '💼 Quiero trabajar'
+    """
 
+    bot = get_bot()
+
+    logger.info(f"[WORKER FLOW] Inicio para {chat_id}")
+
+    show_worker_menu(chat_id)
 logger = logging.getLogger(__name__)
 
 
