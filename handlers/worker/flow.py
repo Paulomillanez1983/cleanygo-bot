@@ -5,7 +5,8 @@ import json
 import logging
 import traceback
 from telebot import types, apihelper
-from config import bot
+from config import get_bot
+bot = get_bot()
 from models.services_data import SERVICES
 from utils.icons import Icons
 from database import db_execute
