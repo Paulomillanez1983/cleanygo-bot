@@ -36,18 +36,22 @@ def get_session(chat_id):
 
         if row:
             state, data_json = row
+            
+            # FIX: Manejar NULL, vacío, o string vacío
+            if data_json is None or data_json == "":
+                logger.warning(f"[SESSION] Data vacía/NULL para {chat_id}, inicializando")
+                return reset_and_fresh_session(chat_id, state or "IDLE")
+            
             try:
                 data = json.loads(data_json) if data_json else {}
                 # Validar que sea dict
                 if not isinstance(data, dict):
                     raise ValueError("Data no es diccionario")
-                return {"state": state, "data": data}
+                return {"state": state or "IDLE", "data": data}
+
             except Exception as e:
                 logger.error(f"[SESSION] JSON corrupto para {chat_id}: {e} - reiniciando")
-                # Limpieza completa: eliminar y recrear
-                clear_state(chat_id)
-                # Crear nueva sesión limpia
-                return create_fresh_session(chat_id)
+                return reset_and_fresh_session(chat_id, "IDLE")
 
         # No existe sesión, crear nueva
         return create_fresh_session(chat_id)
@@ -57,12 +61,32 @@ def get_session(chat_id):
         return {"state": "IDLE", "data": {}}
 
 
+def reset_and_fresh_session(chat_id, state="IDLE"):
+    """Limpia sesión corrupta y crea una nueva"""
+    try:
+        # Eliminar completamente primero
+        db_execute("DELETE FROM sessions WHERE chat_id=?", (str(chat_id),))
+        
+        # Crear nueva con data válida
+        safe_data = json.dumps({})
+        db_execute(
+            "INSERT INTO sessions (chat_id, state, data, last_activity) VALUES (?, ?, ?, ?)",
+            (str(chat_id), state, safe_data, int(time.time()))
+        )
+        logger.info(f"[RESET] Sesión reseteada para {chat_id}")
+        return {"state": state, "data": {}}
+    except Exception as e:
+        logger.error(f"[RESET ERROR] {chat_id}: {e}")
+        return {"state": "IDLE", "data": {}}
+
+
 def create_fresh_session(chat_id):
     """Crea una sesión limpia nueva"""
     try:
+        safe_data = json.dumps({})
         db_execute(
-            "INSERT OR REPLACE INTO sessions (chat_id,state,data,last_activity) VALUES (?,?,?,?)",
-            (str(chat_id), "IDLE", "{}", int(time.time()))
+            "INSERT OR REPLACE INTO sessions (chat_id, state, data, last_activity) VALUES (?, ?, ?, ?)",
+            (str(chat_id), "IDLE", safe_data, int(time.time()))
         )
         return {"state": "IDLE", "data": {}}
     except Exception as e:
@@ -71,11 +95,12 @@ def create_fresh_session(chat_id):
 
 
 def safe_json(data):
+    """Sanitiza datos para JSON"""
     if isinstance(data, dict):
         return {k: safe_json(v) for k, v in data.items()}
     if isinstance(data, list):
         return [safe_json(x) for x in data]
-    if isinstance(data, (str, int, float, type(None))):
+    if isinstance(data, (str, int, float, bool, type(None))):
         return data
     return str(data)
 
@@ -83,43 +108,71 @@ def safe_json(data):
 def set_state(chat_id, state, data=None):
     """Establece estado con transacción atómica"""
     try:
-        session = get_session(chat_id)
-        new_data = session["data"] if isinstance(session["data"], dict) else {}
+        # FIX: Asegurar que data sea dict válido
+        if data is None:
+            data = {}
+        elif not isinstance(data, dict):
+            logger.warning(f"[SET STATE] Data no era dict para {chat_id}, convirtiendo")
+            data = dict(data) if hasattr(data, '__iter__') else {}
         
-        if data and isinstance(data, dict):
+        # Merge con sesión existente si es actualización parcial
+        current = get_session(chat_id)
+        if current and isinstance(current.get("data"), dict):
+            new_data = current["data"].copy()
             new_data.update(data)
+        else:
+            new_data = data
+
+        safe_data_str = json.dumps(safe_json(new_data))
+        
+        # Verificar que el JSON es válido antes de guardar
+        try:
+            json.loads(safe_data_str)  # Validación
+        except json.JSONDecodeError:
+            logger.error(f"[SET STATE] JSON inválido generado para {chat_id}, usando vacío")
+            safe_data_str = "{}"
 
         db_execute(
-            "INSERT OR REPLACE INTO sessions (chat_id,state,data,last_activity) VALUES (?,?,?,?)",
-            (
-                str(chat_id),
-                state,
-                json.dumps(safe_json(new_data)),
-                int(time.time())
-            )
+            "INSERT OR REPLACE INTO sessions (chat_id, state, data, last_activity) VALUES (?, ?, ?, ?)",
+            (str(chat_id), state, safe_data_str, int(time.time()))
         )
         logger.info(f"[STATE] {chat_id} -> {state}")
     except Exception as e:
         logger.error(f"[STATE ERROR] No se pudo setear estado para {chat_id}: {e}")
+        logger.error(traceback.format_exc())
 
 
 def update_data(chat_id, **kwargs):
-    """Actualiza datos específicos"""
+    """Actualiza datos específicos de sesión"""
     try:
         session = get_session(chat_id)
-        new_data = session["data"] if isinstance(session["data"], dict) else {}
-        new_data.update(kwargs)
+        if not isinstance(session.get("data"), dict):
+            logger.warning(f"[UPDATE DATA] Sesión sin data válida para {chat_id}, reseteando data")
+            new_data = {}
+        else:
+            new_data = session["data"].copy()
+        
+        # Solo actualizar kwargs válidos
+        for k, v in kwargs.items():
+            if v is not None:  # Ignorar None explícito
+                new_data[k] = v
+
+        safe_data_str = json.dumps(safe_json(new_data))
+        
+        # Validar antes de guardar
+        try:
+            json.loads(safe_data_str)
+        except json.JSONDecodeError:
+            logger.error(f"[UPDATE DATA] JSON inválido para {chat_id}")
+            return
 
         db_execute(
             "UPDATE sessions SET data=?, last_activity=? WHERE chat_id=?",
-            (
-                json.dumps(safe_json(new_data)),
-                int(time.time()),
-                str(chat_id)
-            )
+            (safe_data_str, int(time.time()), str(chat_id))
         )
     except Exception as e:
         logger.error(f"[UPDATE DATA ERROR] {chat_id}: {e}")
+        logger.error(traceback.format_exc())
 
 
 def get_data(chat_id, key, default=None):
@@ -158,16 +211,19 @@ def handle_worker_start(message):
         logger.error(traceback.format_exc())
         bot.send_message(
             chat_id,
-            f"{Icons.ERROR} Error iniciando registro. Intentá de nuevo con /start"
+            f"{Icons.ERROR} Error iniciando registro. Intentá /start"
         )
 
 
 # ==================== SELECTOR SERVICIOS ====================
 
-def get_service_selector_inline(selected):
+def get_service_selector_inline(selected=None):
     """Genera markup de servicios. selected debe ser lista."""
-    if not isinstance(selected, list):
+    if selected is None:
         selected = []
+    if not isinstance(selected, list):
+        logger.warning(f"[SELECTOR] selected no era lista: {type(selected)}")
+        selected = list(selected) if hasattr(selected, '__iter__') and not isinstance(selected, (str, bytes)) else []
     
     markup = types.InlineKeyboardMarkup(row_width=2)
     buttons = []
@@ -209,14 +265,15 @@ def start_worker_flow(chat_id):
             bot.send_message(chat_id, f"{Icons.INFO} Ya tenés perfil.")
             return
 
-        # Inicializar estado fresco
+        # Limpieza explícita y estado inicial
         clear_state(chat_id)
+        # FIX: Usar set_state con data inicial explícita
         set_state(chat_id, "WORKER_SELECTING_SERVICES", {"selected_services": []})
 
         text = (
             f"{Icons.BRIEFCASE} <b>Registro Profesional</b>\n\n"
             "Paso 1/5\n"
-            "Seleccioná los servicios que ofrecés (podés elegir varios):"
+            "Seleccioná los servicios que ofrecés:"
         )
 
         bot.send_message(
@@ -227,6 +284,7 @@ def start_worker_flow(chat_id):
         )
     except Exception as e:
         logger.error(f"[FLOW START ERROR] {chat_id}: {e}")
+        logger.error(traceback.format_exc())
         bot.send_message(chat_id, f"{Icons.ERROR} Error al iniciar. Intentá /start")
 
 
@@ -237,7 +295,6 @@ def toggle_service(call):
     message_id = call.message.message_id
     
     try:
-        # Extraer service_id
         parts = call.data.split(":")
         if len(parts) != 2:
             bot.answer_callback_query(call.id, "Error interno")
@@ -245,12 +302,14 @@ def toggle_service(call):
             
         service_id = parts[1]
         
-        # Obtener selección actual
-        selected = get_data(chat_id, "selected_services", [])
-        if not isinstance(selected, list):
+        # Obtener selección actual con defensa
+        selected = get_data(chat_id, "selected_services")
+        if selected is None:
             selected = []
-            logger.warning(f"[TOGGLE] selected_services no era lista para {chat_id}, reseteando")
-
+        elif not isinstance(selected, list):
+            logger.warning(f"[TOGGLE] selected_services era {type(selected)}, reseteando a lista")
+            selected = []
+        
         # Toggle lógica
         if service_id in selected:
             selected.remove(service_id)
@@ -265,16 +324,17 @@ def toggle_service(call):
         # Generar nuevo markup
         new_markup = get_service_selector_inline(selected)
         
-        # ⚠️ FIX CRÍTICO: Verificar si realmente cambió antes de editar
+        # FIX CRÍTICO: Comparar antes de editar
         try:
             current_markup = call.message.reply_markup
-            if current_markup and new_markup.to_json() == current_markup.to_json():
-                # No hay cambios visuales, solo ack
-                bot.answer_callback_query(call.id, f"Servicio {action}")
-                return
+            if current_markup:
+                current_json = json.dumps(current_markup.to_dict(), sort_keys=True)
+                new_json = json.dumps(new_markup.to_dict(), sort_keys=True)
+                if current_json == new_json:
+                    bot.answer_callback_query(call.id, f"Servicio {action}")
+                    return
         except Exception as e:
-            # Si falla la comparación, intentar editar igual
-            pass
+            logger.debug(f"[TOGGLE] Error comparando markups: {e}")
         
         # Editar mensaje
         try:
@@ -285,11 +345,14 @@ def toggle_service(call):
             )
             bot.answer_callback_query(call.id, f"✅ {action}")
         except apihelper.ApiTelegramException as e:
-            if "message is not modified" in str(e):
-                # Ignorar silenciosamente, es esperado a veces
-                bot.answer_callback_query(call.id, "Ya actualizado")
+            error_str = str(e)
+            if "message is not modified" in error_str:
+                bot.answer_callback_query(call.id, "Actualizado")
+            elif "message to edit not found" in error_str:
+                logger.warning(f"[TOGGLE] Mensaje no encontrado para {chat_id}")
             else:
-                raise
+                logger.error(f"[TOGGLE API ERROR] {chat_id}: {e}")
+                bot.answer_callback_query(call.id, "❌ Error temporal")
 
     except Exception as e:
         logger.error(f"[TOGGLE ERROR] {chat_id}: {e}")
@@ -302,7 +365,7 @@ def toggle_service(call):
 
 @bot.callback_query_handler(func=lambda c: c.data == "svc_confirm")
 def confirm_services(call):
-    chat_id = call.message.chat.id
+    chat_id = call.message.chat_id
     
     try:
         selected = get_data(chat_id, "selected_services", [])
@@ -315,13 +378,11 @@ def confirm_services(call):
             )
             return
 
-        # Eliminar mensaje de selección
         try:
             bot.delete_message(chat_id, call.message.message_id)
         except Exception as e:
             logger.warning(f"[CONFIRM] No se pudo borrar mensaje: {e}")
 
-        # Cambiar estado
         set_state(
             chat_id,
             "WORKER_ENTERING_NAME",
@@ -337,6 +398,7 @@ def confirm_services(call):
         
     except Exception as e:
         logger.error(f"[CONFIRM ERROR] {chat_id}: {e}")
+        logger.error(traceback.format_exc())
         bot.answer_callback_query(call.id, "Error. Intentá de nuevo", show_alert=True)
 
 
@@ -353,7 +415,11 @@ def save_name(message):
     try:
         update_data(chat_id, worker_name=message.text.strip())
         set_state(chat_id, "WORKER_ENTERING_PHONE")
-        bot.send_message(chat_id, "📱 <b>Paso 3/5</b>\n¿Cuál es tu número de teléfono?\n<i>(Ej: 11 1234-5678)</i>", parse_mode="HTML")
+        bot.send_message(
+            chat_id, 
+            "📱 <b>Paso 3/5</b>\n¿Cuál es tu número de teléfono?",
+            parse_mode="HTML"
+        )
     except Exception as e:
         logger.error(f"[SAVE NAME ERROR] {chat_id}: {e}")
         bot.send_message(chat_id, f"{Icons.ERROR} Error. Intentá de nuevo:")
@@ -372,13 +438,17 @@ def save_phone(message):
     phone = re.sub(r"\D", "", message.text)
     
     if len(phone) < 8:
-        bot.send_message(chat_id, "❌ Número muy corto. Incluí código de área (Ej: 11):")
+        bot.send_message(chat_id, "❌ Número muy corto. Incluí código de área:")
         return
         
     try:
         update_data(chat_id, worker_phone=phone)
         set_state(chat_id, "WORKER_ENTERING_DNI")
-        bot.send_message(chat_id, "🆔 <b>Paso 4/5</b>\n¿Cuál es tu número de DNI?", parse_mode="HTML")
+        bot.send_message(
+            chat_id, 
+            "🆔 <b>Paso 4/5</b>\n¿Cuál es tu número de DNI?",
+            parse_mode="HTML"
+        )
     except Exception as e:
         logger.error(f"[SAVE PHONE ERROR] {chat_id}: {e}")
         bot.send_message(chat_id, f"{Icons.ERROR} Error. Intentá de nuevo:")
@@ -397,7 +467,7 @@ def save_dni(message):
     dni = re.sub(r"\D", "", message.text)
     
     if len(dni) < 7 or len(dni) > 10:
-        bot.send_message(chat_id, "❌ DNI inválido (debe tener 7-10 dígitos). Intentá de nuevo:")
+        bot.send_message(chat_id, "❌ DNI inválido (7-10 dígitos). Intentá de nuevo:")
         return
         
     try:
@@ -406,6 +476,7 @@ def save_dni(message):
         ask_location(chat_id)
     except Exception as e:
         logger.error(f"[SAVE DNI ERROR] {chat_id}: {e}")
+        logger.error(traceback.format_exc())
         bot.send_message(chat_id, f"{Icons.ERROR} Error guardando datos. Intentá /start")
 
 
@@ -423,7 +494,7 @@ def ask_location(chat_id):
 
     bot.send_message(
         chat_id,
-        "📍 <b>Paso 5/5</b>\n\nCompartí tu ubicación actual para que los clientes te encuentren.\n\n<i>Tocá el botón de abajo 👇</i>",
+        "📍 <b>Paso 5/5</b>\n\nCompartí tu ubicación para que los clientes te encuentren.\n\n<i>Tocá el botón de abajo 👇</i>",
         parse_mode="HTML",
         reply_markup=markup
     )
@@ -444,28 +515,23 @@ def cancel_registration(message):
 def save_location(message):
     chat_id = message.chat.id
     
-    # Verificar que esté en el estado correcto
     session = get_session(chat_id)
     if session.get("state") != "WORKER_SHARING_LOCATION":
-        # Ignorar ubicaciones fuera de contexto
         return
         
     try:
         lat = message.location.latitude
         lon = message.location.longitude
 
-        # Actualizar worker con ubicación y activar
         db_execute(
             "UPDATE workers SET lat=?, lon=?, is_active=1 WHERE chat_id=?",
             (lat, lon, str(chat_id))
         )
 
-        # Mensaje de éxito con remove markup
         bot.send_message(
             chat_id, 
             "🎉 <b>¡Registro completado!</b>\n\n"
-            "Tu perfil está activo y visible para clientes.\n"
-            "Te contactaremos cuando haya trabajos disponibles en tu zona.",
+            "Tu perfil está activo y visible para clientes.",
             parse_mode="HTML",
             reply_markup=types.ReplyKeyboardRemove()
         )
@@ -477,7 +543,7 @@ def save_location(message):
         logger.error(f"[SAVE LOCATION ERROR] {chat_id}: {e}")
         bot.send_message(
             chat_id,
-            f"{Icons.ERROR} Error guardando ubicación. Intentá de nuevo o contactá soporte.",
+            f"{Icons.ERROR} Error guardando ubicación.",
             reply_markup=types.ReplyKeyboardRemove()
         )
 
@@ -485,7 +551,7 @@ def save_location(message):
 # ==================== GUARDAR WORKER ====================
 
 def save_worker_data(chat_id, dni):
-    """Guarda datos básicos del worker (sin ubicación)"""
+    """Guarda datos básicos del worker"""
     try:
         name = get_data(chat_id, "worker_name")
         phone = get_data(chat_id, "worker_phone")
@@ -494,7 +560,6 @@ def save_worker_data(chat_id, dni):
         if not name or not phone:
             raise ValueError("Faltan datos obligatorios")
 
-        # Insertar worker (inactivo hasta tener ubicación)
         db_execute(
             """
             INSERT OR REPLACE INTO workers
@@ -504,24 +569,19 @@ def save_worker_data(chat_id, dni):
             (str(chat_id), name, phone, dni, int(time.time()))
         )
 
-        # Limpiar servicios anteriores e insertar nuevos
         db_execute(
             "DELETE FROM worker_services WHERE chat_id=?",
             (str(chat_id),)
         )
 
         for svc in services:
-            if svc:  # Validar que no sea None/empty
+            if svc:
                 db_execute(
-                    """
-                    INSERT INTO worker_services
-                    (chat_id, service_id)
-                    VALUES (?, ?)
-                    """,
+                    "INSERT INTO worker_services (chat_id, service_id) VALUES (?, ?)",
                     (str(chat_id), svc)
                 )
         
-        logger.info(f"[SAVE WORKER] Datos guardados para {chat_id}, servicios: {services}")
+        logger.info(f"[SAVE WORKER] Datos guardados para {chat_id}")
         
     except Exception as e:
         logger.error(f"[SAVE WORKER ERROR] {chat_id}: {e}")
