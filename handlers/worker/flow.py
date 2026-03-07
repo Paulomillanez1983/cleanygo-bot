@@ -402,12 +402,48 @@ def confirm_services(call):
         bot.answer_callback_query(call.id, "Error. Intentá de nuevo", show_alert=True)
 
 
-# ==================== NOMBRE ====================
+# ==================== DISPATCHER CENTRALIZADO (FIX RACE CONDITIONS) ====================
 
-@bot.message_handler(func=lambda m: get_session(m.chat.id).get("state") == "WORKER_ENTERING_NAME")
-def save_name(message):
+# ESTADOS DEL WORKER FLOW
+WORKER_STATES = [
+    "WORKER_ENTERING_NAME",
+    "WORKER_ENTERING_PHONE", 
+    "WORKER_ENTERING_DNI",
+    "WORKER_SHARING_LOCATION"
+]
+
+@bot.message_handler(func=lambda m: m.text and get_session(m.chat.id).get("state") in WORKER_STATES)
+def worker_flow_dispatcher(message):
+    """
+    Handler ÚNICO que reemplaza los 3 handlers individuales.
+    Obtiene get_session() UNA SOLA VEZ y despacha internamente.
+    Elimina las race conditions de múltiples lambdas ejecutándose en paralelo.
+    """
     chat_id = message.chat.id
     
+    # UNA SOLA llamada a DB para todo el flujo
+    session = get_session(chat_id)
+    state = session.get("state")
+    
+    logger.info(f"[DISPATCHER] chat_id={chat_id}, state={state}")
+    
+    try:
+        if state == "WORKER_ENTERING_NAME":
+            _handle_name_step(message, chat_id)
+        elif state == "WORKER_ENTERING_PHONE":
+            _handle_phone_step(message, chat_id)
+        elif state == "WORKER_ENTERING_DNI":
+            _handle_dni_step(message, chat_id)
+        elif state == "WORKER_SHARING_LOCATION":
+            _handle_location_step(message, chat_id)
+    except Exception as e:
+        logger.error(f"[DISPATCHER ERROR] {chat_id} en estado {state}: {e}")
+        logger.error(traceback.format_exc())
+        bot.send_message(chat_id, f"{Icons.ERROR} Error procesando mensaje. Intentá /start")
+
+
+def _handle_name_step(message, chat_id):
+    """Paso 2: Nombre"""
     if not message.text or len(message.text.strip()) < 2:
         bot.send_message(chat_id, "❌ Nombre muy corto. Intentá de nuevo:")
         return
@@ -421,16 +457,12 @@ def save_name(message):
             parse_mode="HTML"
         )
     except Exception as e:
-        logger.error(f"[SAVE NAME ERROR] {chat_id}: {e}")
+        logger.error(f"[NAME STEP ERROR] {chat_id}: {e}")
         bot.send_message(chat_id, f"{Icons.ERROR} Error. Intentá de nuevo:")
 
 
-# ==================== TELEFONO ====================
-
-@bot.message_handler(func=lambda m: get_session(m.chat.id).get("state") == "WORKER_ENTERING_PHONE")
-def save_phone(message):
-    chat_id = message.chat.id
-    
+def _handle_phone_step(message, chat_id):
+    """Paso 3: Teléfono"""
     if not message.text:
         bot.send_message(chat_id, "❌ Necesito un número de teléfono. Intentá de nuevo:")
         return
@@ -450,16 +482,12 @@ def save_phone(message):
             parse_mode="HTML"
         )
     except Exception as e:
-        logger.error(f"[SAVE PHONE ERROR] {chat_id}: {e}")
+        logger.error(f"[PHONE STEP ERROR] {chat_id}: {e}")
         bot.send_message(chat_id, f"{Icons.ERROR} Error. Intentá de nuevo:")
 
 
-# ==================== DNI ====================
-
-@bot.message_handler(func=lambda m: get_session(m.chat.id).get("state") == "WORKER_ENTERING_DNI")
-def save_dni(message):
-    chat_id = message.chat.id
-    
+def _handle_dni_step(message, chat_id):
+    """Paso 4: DNI"""
     if not message.text:
         bot.send_message(chat_id, "❌ Necesito el número de DNI. Intentá de nuevo:")
         return
@@ -473,16 +501,15 @@ def save_dni(message):
     try:
         save_worker_data(chat_id, dni)
         set_state(chat_id, "WORKER_SHARING_LOCATION")
-        ask_location(chat_id)
+        _ask_location_step(chat_id)
     except Exception as e:
-        logger.error(f"[SAVE DNI ERROR] {chat_id}: {e}")
+        logger.error(f"[DNI STEP ERROR] {chat_id}: {e}")
         logger.error(traceback.format_exc())
         bot.send_message(chat_id, f"{Icons.ERROR} Error guardando datos. Intentá /start")
 
 
-# ==================== UBICACION ====================
-
-def ask_location(chat_id):
+def _ask_location_step(chat_id):
+    """Paso 5: Solicitar ubicación"""
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     markup.add(
         types.KeyboardButton(
@@ -500,23 +527,35 @@ def ask_location(chat_id):
     )
 
 
-@bot.message_handler(func=lambda m: m.text and "cancelar" in m.text.lower() and get_session(m.chat.id).get("state") == "WORKER_SHARING_LOCATION")
-def cancel_registration(message):
-    chat_id = message.chat.id
-    clear_state(chat_id)
-    bot.send_message(
-        chat_id,
-        "❌ Registro cancelado. Podés reiniciar cuando quieras con /start",
-        reply_markup=types.ReplyKeyboardRemove()
-    )
+def _handle_location_step(message, chat_id):
+    """Maneja mensajes de texto cuando se espera ubicación"""
+    if message.text and "cancelar" in message.text.lower():
+        clear_state(chat_id)
+        bot.send_message(
+            chat_id,
+            "❌ Registro cancelado. Podés reiniciar cuando quieras con /start",
+            reply_markup=types.ReplyKeyboardRemove()
+        )
+    else:
+        # No es cancelar, recordar que debe enviar ubicación
+        bot.send_message(
+            chat_id,
+            "⚠️ Por favor, usá el botón <b>📍 Enviar mi ubicación actual</b> o tocá <b>❌ Cancelar registro</b>",
+            parse_mode="HTML"
+        )
 
+
+# ==================== UBICACIÓN (CONTENT TYPE) ====================
 
 @bot.message_handler(content_types=["location"])
 def save_location(message):
+    """Handler separado para ubicación (content_type no se puede filtrar por estado fácilmente)"""
     chat_id = message.chat.id
     
+    # Verificación de estado
     session = get_session(chat_id)
     if session.get("state") != "WORKER_SHARING_LOCATION":
+        # Ignorar ubicaciones fuera del flujo de registro
         return
         
     try:
