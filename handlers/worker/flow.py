@@ -313,11 +313,10 @@ if len(text) > 100:
     bot.send_message(chat_id, "❌ Nombre muy largo:")  
     return  
   
-# Usar UserSession
-
-UserSession.update(chat_id, worker_name=text)
-UserSession.update(chat_id, state=WorkerStates.ENTERING_PHONE)
-
+# Usar UserSession  
+UserSession.update(chat_id, worker_name=text)  
+UserSession.set(chat_id, WorkerStates.ENTERING_PHONE)  
+  
 bot.send_message(  
     chat_id,  
     f"👤 <b>Nombre:</b> {text}\n\n"  
@@ -335,11 +334,11 @@ phone = re.sub(r"\D", "", message.text)
   
 if len(phone) < 8:  
     bot.send_message(chat_id, "❌ Muy corto. Incluí código de área:")  
-    return
-
-UserSession.update(chat_id, worker_phone=phone)
-UserSession.update(chat_id, state=WorkerStates.ENTERING_DNI)
-
+    return  
+  
+UserSession.update(chat_id, worker_phone=phone)  
+UserSession.set(chat_id, WorkerStates.ENTERING_DNI)  
+  
 formatted = f"{phone[:2]} {phone[2:6]}-{phone[6:]}" if len(phone) >= 8 else phone  
   
 bot.send_message(  
@@ -363,7 +362,7 @@ if len(dni) < 7 or len(dni) > 10:
   
 try:  
     _save_worker_to_db(chat_id, dni)  
-    UserSession.update(chat_id, state=WorkerStates.SHARING_LOCATION)  
+    UserSession.set(chat_id, WorkerStates.SHARING_LOCATION)  
     _request_location(chat_id)  
 except Exception as e:  
     logger.error(f"[DNI ERROR] {chat_id}: {e}")  
@@ -497,4 +496,3 @@ except Exception as e:
         f"{Icons.ERROR} Error guardando ubicación.",  
         reply_markup=types.ReplyKeyboardRemove()  
     )
-
