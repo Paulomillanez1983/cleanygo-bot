@@ -1,4 +1,5 @@
-from config import clear_state, set_state, get_state, logger
+from config import logger
+from models.user_state import clear_state, set_state, get_state
 from models.states import UserState
 from utils.icons import Icons
 from utils.keyboards import get_role_keyboard
