@@ -43,15 +43,15 @@ ACTIVE_WORKER_STATES = [
     WorkerStates.SHARING_LOCATION,
 ]
 
-# ==================== INICIO DEL FLUJO ====================
+# ==================== FUNCIÓN PÚBLICA PARA IMPORTACIÓN EXTERNA ====================
 
-@bot.message_handler(func=lambda m: m.text and "trabajar" in m.text.lower())
-def handle_worker_start(message):
-    """Punto de entrada: Botón 'Quiero trabajar'"""
-    chat_id = message.chat.id
-    
+def start_worker_flow(chat_id):
+    """
+    FUNCIÓN PÚBLICA que puede ser importada desde otros handlers (ej: common.py).
+    Inicia el flujo de registro de worker programáticamente.
+    """
     try:
-        logger.info(f"[START] Worker flow | chat_id={chat_id}")
+        logger.info(f"[START FLOW] chat_id={chat_id}")
         
         # Verificar si ya tiene perfil
         existing = db_execute(
@@ -64,7 +64,7 @@ def handle_worker_start(message):
             bot.send_message(chat_id, f"{Icons.INFO} Ya tenés un perfil registrado.")
             return
         
-        # Usar UserSession directamente (thread-safe)
+        # Limpiar y empezar
         UserSession.clear(chat_id)
         UserSession.set(chat_id, WorkerStates.SELECTING_SERVICES, {
             "selected_services": [],
@@ -74,10 +74,25 @@ def handle_worker_start(message):
         _send_service_selector(chat_id, [])
         
     except Exception as e:
-        logger.error(f"[START ERROR] {chat_id}: {e}")
+        logger.error(f"[START FLOW ERROR] {chat_id}: {e}")
         logger.error(traceback.format_exc())
         bot.send_message(chat_id, f"{Icons.ERROR} Error iniciando. Usá /start")
 
+
+# ==================== HANDLER PARA BOTÓN "TRABAJAR" ====================
+
+@bot.message_handler(func=lambda m: m.text and "trabajar" in m.text.lower())
+def handle_worker_start(message):
+    """
+    Handler para cuando el usuario toca el botón "💼 Quiero trabajar".
+    Llama a start_worker_flow() internamente.
+    """
+    chat_id = message.chat.id
+    logger.info(f"[HANDLER] Activado por botón | chat_id={chat_id}")
+    start_worker_flow(chat_id)
+
+
+# ==================== SELECTOR DE SERVICIOS ====================
 
 def _send_service_selector(chat_id, selected_services):
     """Envía selector de servicios"""
@@ -142,7 +157,7 @@ def handle_service_toggle(call):
             
         service_id = parts[1]
         
-        # Usar UserSession.get_data() y update()
+        # Usar UserSession
         selected = UserSession.get_data(chat_id, "selected_services", [])
         if not isinstance(selected, list):
             selected = []
