@@ -49,6 +49,18 @@ def get_session(chat_id: str):
     return {"state": "IDLE", "data": {}}
 
 
+def safe_json(data):
+    """Convierte solo tipos serializables para la sesión"""
+    if isinstance(data, dict):
+        return {k: safe_json(v) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [safe_json(x) for x in data]
+    elif isinstance(data, (str, int, float, type(None))):
+        return data
+    else:
+        return str(data)  # Convertir objetos no serializables a string
+
+
 def set_state(chat_id: str, state: str, data: dict = None):
     session = get_session(chat_id)
     new_data = session["data"]
@@ -56,7 +68,7 @@ def set_state(chat_id: str, state: str, data: dict = None):
         new_data.update(data)
     db_execute(
         "INSERT OR REPLACE INTO sessions (chat_id, state, data, last_activity) VALUES (?, ?, ?, ?)",
-        (str(chat_id), state, json.dumps(new_data), int(time.time())),
+        (str(chat_id), state, json.dumps(safe_json(new_data)), int(time.time())),
         commit=True
     )
 
@@ -67,7 +79,7 @@ def update_data(chat_id: str, **kwargs):
     new_data.update(kwargs)
     db_execute(
         "UPDATE sessions SET data = ?, last_activity = ? WHERE chat_id = ?",
-        (json.dumps(new_data), int(time.time()), str(chat_id)),
+        (json.dumps(safe_json(new_data)), int(time.time()), str(chat_id)),
         commit=True
     )
 
@@ -177,11 +189,14 @@ def handle_service_toggle(call):
             selected.append(service_id)
             bot.answer_callback_query(call.id, "Servicio agregado ✅")
         update_data(chat_id, selected_services=selected)
-        bot.edit_message_reply_markup(
-            chat_id,
-            call.message.message_id,
-            reply_markup=get_service_selector_inline(selected)
-        )
+        try:
+            bot.edit_message_reply_markup(
+                chat_id,
+                call.message.message_id,
+                reply_markup=get_service_selector_inline(selected)
+            )
+        except apihelper.ApiTelegramException as e:
+            logger.warning(f"edit_message_reply_markup falló: {e}")
     except Exception:
         logger.error(traceback.format_exc())
         bot.answer_callback_query(call.id, "Error ❌")
@@ -382,4 +397,4 @@ def save_worker_data(chat_id, dni):
             """,
             (str(chat_id), service_id, precio),
             commit=True
-    )
+        )
