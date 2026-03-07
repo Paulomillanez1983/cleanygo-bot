@@ -1,51 +1,42 @@
-"""
-Flujo completo para clientes - Solicitud de servicios (UX optimizada)
-con asignación automática a trabajadores, confirmación bidireccional y menú funcional.
-VERSIÓN ESTABILIZADA
-"""
-
 import asyncio
 import logging
-from telebot import types
+from telebot import types, apihelper
 
 from config import notify_client, bot
-from models.user_state import set_state, update_data, get_data, UserState, get_session, clear_state
+from models.user_state import (
+    set_state, update_data, get_data, get_session, clear_state, UserState
+)
 from models.services_data import SERVICES
 from utils.icons import Icons
 from utils.keyboards import (
-    get_service_selector,
     get_time_selector,
-    get_custom_time_selector,
     get_location_keyboard,
-    get_confirmation_keyboard,
-    get_role_keyboard
+    get_confirmation_keyboard
 )
-from utils.telegram_safe import send_safe, edit_safe, delete_safe
-from handlers.common import remove_keyboard
+from utils.telegram_safe import send_safe, edit_safe, delete_safe, remove_keyboard
+from handlers.worker import jobs as worker_jobs
+from handlers.worker.main import show_worker_menu
 from requests_db import (
     create_request,
     assign_worker_to_request,
     get_request,
-    complete_request,
     cancel_request
 )
-from handlers.worker import jobs as worker_jobs
-from handlers.worker.main import show_worker_menu
 
 logger = logging.getLogger(__name__)
 
-# ==================== REGISTRO HANDLERS ====================
 
-def register_handlers(_bot):
-    """
-    Compatibilidad con bot.py.
-    No hace nada porque los handlers ya están registrados
-    mediante decoradores usando el bot global de config.
-    """
-    logger.info("[CLIENT FLOW] Handlers cargados correctamente")
+# ==================== AUXILIARES ====================
+def safe_json(data):
+    if isinstance(data, dict):
+        return {k: safe_json(v) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [safe_json(x) for x in data]
+    elif isinstance(data, (str, int, float, type(None))):
+        return data
+    else:
+        return str(data)
 
-
-# ==================== FUNCIONES AUXILIARES ====================
 
 def debug_session(chat_id: str, label: str):
     try:
@@ -60,9 +51,8 @@ def debug_session(chat_id: str, label: str):
 def save_state_and_data(chat_id: str, state: UserState, data_updates: dict = None):
     chat_id = str(chat_id)
     if data_updates:
-        for key, value in data_updates.items():
-            update_data(chat_id, **{key: value})
-    set_state(chat_id, state)
+        update_data(chat_id, **safe_json(data_updates))
+    set_state(chat_id, state.value)
     logger.info(f"[STATE] chat_id={chat_id} -> {state.value}")
 
 
@@ -76,7 +66,6 @@ def get_service_display(service_id: str, with_price: bool = False) -> str:
 
 
 # ==================== FLUJO INICIAL ====================
-
 @bot.message_handler(func=lambda m: m.text and ("Necesito" in m.text or "servicio" in m.text.lower()))
 def handle_client_start(message):
     start_client_flow(message.chat.id)
@@ -103,14 +92,13 @@ def start_client_flow(chat_id):
 
 
 # ==================== SERVICIO ====================
-
 @bot.callback_query_handler(func=lambda c: c.data.startswith("client_svc:"))
 def handle_client_service_selection(call):
     chat_id = str(call.message.chat.id)
     service_id = call.data.split(":")[1]
 
     update_data(chat_id, service_id=service_id, service_name=SERVICES[service_id]["name"])
-    set_state(chat_id, UserState.CLIENT_SELECTING_TIME)
+    save_state_and_data(chat_id, UserState.CLIENT_SELECTING_TIME)
     bot.answer_callback_query(call.id)
 
     text = (
@@ -122,7 +110,6 @@ def handle_client_service_selection(call):
 
 
 # ==================== TIEMPO ====================
-
 @bot.callback_query_handler(func=lambda c: c.data.startswith("time_quick:"))
 def handle_quick_time(call):
     chat_id = str(call.message.chat.id)
@@ -135,7 +122,6 @@ def handle_quick_time(call):
 
 
 # ==================== UBICACIÓN ====================
-
 def proceed_to_location(chat_id: str, message_id: int):
     chat_id = str(chat_id)
     service_id = get_data(chat_id, "service_id")
@@ -146,7 +132,7 @@ def proceed_to_location(chat_id: str, message_id: int):
         send_safe(bot, chat_id, f"{Icons.ERROR} Error: sesión expirada. Usá /start.")
         return
 
-    set_state(chat_id, UserState.CLIENT_SHARING_LOCATION)
+    save_state_and_data(chat_id, UserState.CLIENT_SHARING_LOCATION)
     text = f"""
 {Icons.LOCATION} <b>Último paso: Ubicación</b>
 
@@ -178,13 +164,13 @@ def handle_client_location(message):
 
     update_data(chat_id, lat=lat, lon=lon)
     remove_keyboard(bot, chat_id, "Ubicación recibida")
-    set_state(chat_id, UserState.CLIENT_CONFIRMING)
+    save_state_and_data(chat_id, UserState.CLIENT_CONFIRMING)
 
     service_info = worker_jobs.SERVICES_PRICES.get(service_id, {"price": 0})
     text = f"""
 {Icons.CALENDAR} <b>Confirmá tu solicitud</b>
 
-Servicio: {service_id}
+Servicio: {get_service_display(service_id)}
 Precio: ${service_info['price']}
 Hora: {time_str} {period}
 """
@@ -192,7 +178,6 @@ Hora: {time_str} {period}
 
 
 # ==================== CONFIRMACIÓN ====================
-
 @bot.callback_query_handler(func=lambda c: c.data == "confirm_yes_client")
 def handle_client_confirmation(call):
     chat_id = str(call.message.chat.id)
@@ -219,7 +204,7 @@ def handle_client_confirmation(call):
         return
 
     update_data(chat_id, request_id=request_id)
-    set_state(chat_id, UserState.CLIENT_WAITING_ACCEPTANCE)
+    save_state_and_data(chat_id, UserState.CLIENT_WAITING_ACCEPTANCE)
     bot.answer_callback_query(call.id, "Buscando profesionales...")
 
     hora = f"{time_str} {period}"
@@ -269,7 +254,6 @@ Hora: {hora}
 
 
 # ==================== RESPUESTA CLIENTE ====================
-
 @bot.callback_query_handler(func=lambda c: c.data.startswith("client_accept:"))
 def handle_client_accept_worker(call):
     chat_id = str(call.message.chat.id)
@@ -296,4 +280,4 @@ def handle_client_reject_worker(call):
     request_id = int(call.data.split(":")[1])
 
     cancel_request(request_id, reason="Cliente rechazó")
-    send_safe(bot, chat_id, "Solicitud cancelada")
+    send_safe(bot, chat_id, f"{Icons.ERROR} Solicitud cancelada")
