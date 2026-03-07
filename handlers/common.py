@@ -117,11 +117,7 @@ Conectamos personas que necesitan servicios con profesionales confiables cerca d
 @soporte_cleanygo
 """
 
-        send_safe(
-            bot,
-            message.chat.id,
-            text
-        )
+        send_safe(bot, message.chat.id, text)
 
 
     # ================= MENU PRINCIPAL =================
@@ -141,12 +137,12 @@ Conectamos personas que necesitan servicios con profesionales confiables cerca d
             start_client_flow(message)
             return
 
-# ================= TRABAJADOR =================
+        # ================= TRABAJADOR =================
 
-if "trabajar" in text:
-    from handlers.worker.flow import start_worker_flow
-    start_worker_flow(message.chat.id)
-    return
+        if "trabajar" in text:
+            from handlers.worker.flow import start_worker_flow
+            start_worker_flow(chat_id)
+            return
 
         # ================= AYUDA =================
 
