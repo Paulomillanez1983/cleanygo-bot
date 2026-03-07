@@ -136,40 +136,35 @@ Conectamos personas que necesitan servicios con profesionales confiables cerca d
         send_safe(bot, message.chat.id, text)
 
 
-    # ================= MENU PRINCIPAL =================
+# ================= MENU PRINCIPAL =================
 
-    @bot.message_handler(func=lambda message: True, content_types=["text"])
-    def handle_main_menu(message):
+@bot.message_handler(
+    func=lambda message: get_state(message.chat.id) == UserState.SELECTING_ROLE.value,
+    content_types=["text"]
+)
+def handle_main_menu(message):
 
-        chat_id = message.chat.id
-        text = message.text.strip().lower()
+    chat_id = message.chat.id
+    text = message.text.strip().lower()
 
-        state = get_state(chat_id)
+    logger.info(f"[MENU] Texto recibido: {text} | chat_id={chat_id}")
 
-        if state != UserState.SELECTING_ROLE.value:
-            logger.info(
-                f"[MENU] Ignorado por flujo activo | state={state} | chat_id={chat_id}"
-            )
-            return
+    if "necesito un servicio" in text:
+        from handlers.client.flow import start_client_flow
+        start_client_flow(message)
+        return
 
-        logger.info(f"[MENU] Texto recibido: {text} | chat_id={chat_id}")
+    if "trabajar" in text:
+        from handlers.worker.flow import start_worker_flow
+        start_worker_flow(chat_id)
+        return
 
-        if "necesito un servicio" in text:
-            from handlers.client.flow import start_client_flow
-            start_client_flow(message)
-            return
+    if "ayuda" in text:
+        cmd_help(message)
+        return
 
-        if "trabajar" in text:
-            from handlers.worker.flow import start_worker_flow
-            start_worker_flow(chat_id)
-            return
-
-        if "ayuda" in text:
-            cmd_help(message)
-            return
-
-        send_safe(
-            bot,
-            chat_id,
-            f"{Icons.INFO} No entendí esa opción. Usá el menú o escribí /start."
-        )
+    send_safe(
+        bot,
+        chat_id,
+        f"{Icons.INFO} No entendí esa opción. Usá el menú o escribí /start."
+    )
