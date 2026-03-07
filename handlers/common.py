@@ -158,4 +158,4 @@ Conectamos personas que necesitan servicios con profesionales confiables cerca d
             bot,
             chat_id,
             f"{Icons.INFO} No entendí esa opción. Usá el menú o escribí /start."
-            )
+        )
