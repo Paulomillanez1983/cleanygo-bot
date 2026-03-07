@@ -1,6 +1,6 @@
 """
-Worker registration flow - Versión corregida
-Usa únicamente config.py para sesiones y DB (elimina duplicación)
+Worker registration flow - Versión corregida y unificada
+Usa ÚNICAMENTE UserSession desde config (elimina duplicación)
 """
 import os
 import time
@@ -10,26 +10,20 @@ import logging
 import traceback
 from telebot import types, apihelper
 
-# Importar TODO desde config (elimina database.py de la ecuación)
-from config import (
+# Importar TODO desde database (que re-exporta desde config)
+from database import (
     get_bot, 
-    db_execute,  # Función thread-safe con retry
+    db_execute,
     Icons, 
     logger,
-    UserSession,  # Clase principal - usar esto directamente
-    # Helpers de compatibilidad (opcional, pero mejor usar UserSession directo)
-    get_session as config_get_session,
-    set_state as config_set_state,
-    update_data as config_update_data,
-    clear_state as config_clear_state,
-    get_data as config_get_data,
+    UserSession,  # <-- USAR ESTO EXCLUSIVAMENTE
 )
 
 bot = get_bot()
 
 from models.services_data import SERVICES
 
-# Configuración de API helper
+# Configuración
 apihelper.SESSION_TIME_TO_LIVE = 10 * 60
 
 # ==================== CONSTANTES ====================
@@ -57,7 +51,7 @@ def handle_worker_start(message):
     chat_id = message.chat.id
     
     try:
-        logger.info(f"[START] Worker flow iniciado | chat_id={chat_id}")
+        logger.info(f"[START] Worker flow | chat_id={chat_id}")
         
         # Verificar si ya tiene perfil
         existing = db_execute(
@@ -70,7 +64,7 @@ def handle_worker_start(message):
             bot.send_message(chat_id, f"{Icons.INFO} Ya tenés un perfil registrado.")
             return
         
-        # Limpiar y empezar fresco usando UserSession directamente
+        # Usar UserSession directamente (thread-safe)
         UserSession.clear(chat_id)
         UserSession.set(chat_id, WorkerStates.SELECTING_SERVICES, {
             "selected_services": [],
@@ -82,10 +76,7 @@ def handle_worker_start(message):
     except Exception as e:
         logger.error(f"[START ERROR] {chat_id}: {e}")
         logger.error(traceback.format_exc())
-        bot.send_message(
-            chat_id,
-            f"{Icons.ERROR} Error iniciando. Por favor usá /start"
-        )
+        bot.send_message(chat_id, f"{Icons.ERROR} Error iniciando. Usá /start")
 
 
 def _send_service_selector(chat_id, selected_services):
@@ -107,7 +98,7 @@ def _send_service_selector(chat_id, selected_services):
 
 
 def _build_service_markup(selected_services):
-    """Construye inline keyboard de servicios"""
+    """Construye inline keyboard"""
     if not isinstance(selected_services, list):
         selected_services = []
     
@@ -135,26 +126,25 @@ def _build_service_markup(selected_services):
     markup.add(*buttons)
     return markup
 
-# ==================== CALLBACKS DE SERVICIOS ====================
+# ==================== CALLBACKS ====================
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("svc_toggle:"))
 def handle_service_toggle(call):
-    """Toggle de selección de servicios"""
+    """Toggle de servicios"""
     chat_id = call.message.chat.id
     message_id = call.message.message_id
     
     try:
         parts = call.data.split(":")
         if len(parts) != 2:
-            bot.answer_callback_query(call.id, "Error de datos")
+            bot.answer_callback_query(call.id, "Error")
             return
             
         service_id = parts[1]
         
-        # Obtener selección actual usando UserSession
+        # Usar UserSession.get_data() y update()
         selected = UserSession.get_data(chat_id, "selected_services", [])
         if not isinstance(selected, list):
-            logger.warning(f"[TOGGLE] Corrigiendo tipo: {type(selected)}")
             selected = []
         
         # Toggle
@@ -168,10 +158,10 @@ def handle_service_toggle(call):
         # Guardar
         UserSession.update(chat_id, selected_services=selected)
         
-        # Actualizar markup
+        # Actualizar UI
         new_markup = _build_service_markup(selected)
         
-        # Optimización: comparar antes de editar
+        # Comparar antes de editar (optimización)
         try:
             current = call.message.reply_markup
             if current and _markup_equal(current, new_markup):
@@ -180,7 +170,6 @@ def handle_service_toggle(call):
         except Exception as e:
             logger.debug(f"[TOGGLE] Error comparando: {e}")
         
-        # Editar
         try:
             bot.edit_message_reply_markup(
                 chat_id=chat_id,
@@ -194,20 +183,20 @@ def handle_service_toggle(call):
             if "message is not modified" in error_str:
                 bot.answer_callback_query(call.id, "Actualizado")
             elif "message to edit not found" in error_str:
-                logger.warning(f"[TOGGLE] Mensaje {message_id} no encontrado")
+                logger.warning(f"[TOGGLE] Mensaje no encontrado")
             else:
                 raise
                 
     except Exception as e:
         logger.error(f"[TOGGLE ERROR] {chat_id}: {e}")
         try:
-            bot.answer_callback_query(call.id, "❌ Error temporal")
+            bot.answer_callback_query(call.id, "❌ Error")
         except:
             pass
 
 
 def _markup_equal(markup1, markup2):
-    """Compara markups de forma segura"""
+    """Compara markups"""
     try:
         return json.dumps(markup1.to_dict(), sort_keys=True) == \
                json.dumps(markup2.to_dict(), sort_keys=True)
@@ -226,18 +215,18 @@ def handle_service_confirm(call):
         if not selected or len(selected) == 0:
             bot.answer_callback_query(
                 call.id,
-                "⚠️ Debés seleccionar al menos un servicio",
+                "⚠️ Seleccioná al menos un servicio",
                 show_alert=True
             )
             return
         
-        # Borrar mensaje de selección
+        # Borrar mensaje
         try:
             bot.delete_message(chat_id, call.message.message_id)
         except Exception as e:
-            logger.debug(f"[CONFIRM] No se pudo borrar mensaje: {e}")
+            logger.debug(f"[CONFIRM] No se pudo borrar: {e}")
         
-        # Avanzar
+        # Avanzar estado
         UserSession.set(chat_id, WorkerStates.ENTERING_NAME, {
             "selected_services": selected
         })
@@ -251,7 +240,7 @@ def handle_service_confirm(call):
         
     except Exception as e:
         logger.error(f"[CONFIRM ERROR] {chat_id}: {e}")
-        bot.answer_callback_query(call.id, "Error. Intentá de nuevo", show_alert=True)
+        bot.answer_callback_query(call.id, "Error", show_alert=True)
 
 # ==================== DISPATCHER CENTRALIZADO ====================
 
@@ -261,11 +250,11 @@ def worker_flow_dispatcher(message):
     HANDLER ÚNICO Y CENTRALIZADO.
     
     CRÍTICO: Usa UserSession.get() UNA SOLA VEZ por mensaje.
-    Elimina las race conditions de múltiples lambdas en paralelo.
+    Elimina race conditions de múltiples lambdas en paralelo.
     """
     chat_id = message.chat.id
     
-    # UNA SOLA consulta a base de datos
+    # UNA SOLA consulta a DB para todo el flujo
     session = UserSession.get(chat_id)
     current_state = session.get("state")
     
@@ -281,53 +270,48 @@ def worker_flow_dispatcher(message):
         elif current_state == WorkerStates.SHARING_LOCATION:
             _process_location_text(message, chat_id)
         elif current_state == WorkerStates.SELECTING_SERVICES:
-            bot.send_message(
-                chat_id,
-                "⚠️ Usá los botones de arriba para seleccionar servicios"
-            )
+            bot.send_message(chat_id, "⚠️ Usá los botones de arriba")
             
     except Exception as e:
-        logger.error(f"[DISPATCHER ERROR] {chat_id} en {current_state}: {e}")
+        logger.error(f"[DISPATCHER ERROR] {chat_id}: {e}")
         logger.error(traceback.format_exc())
-        bot.send_message(
-            chat_id,
-            f"{Icons.ERROR} Ocurrió un error. Escribí /start para reiniciar."
-        )
+        bot.send_message(chat_id, f"{Icons.ERROR} Error. Escribí /start")
 
 
 def _process_name_input(message, chat_id):
-    """Procesa nombre (Paso 2)"""
+    """Paso 2: Nombre"""
     text = message.text.strip() if message.text else ""
     
     if len(text) < 2:
-        bot.send_message(chat_id, "❌ El nombre debe tener al menos 2 caracteres:")
+        bot.send_message(chat_id, "❌ Nombre muy corto (mínimo 2):")
         return
     
     if len(text) > 100:
-        bot.send_message(chat_id, "❌ El nombre es muy largo:")
+        bot.send_message(chat_id, "❌ Nombre muy largo:")
         return
     
+    # Usar UserSession
     UserSession.update(chat_id, worker_name=text)
     UserSession.set(chat_id, WorkerStates.ENTERING_PHONE)
     
     bot.send_message(
         chat_id,
         f"👤 <b>Nombre:</b> {text}\n\n"
-        f"📱 <b>Paso 3/5</b>\n¿Cuál es tu número de teléfono?",
+        f"📱 <b>Paso 3/5</b>\n¿Cuál es tu teléfono?",
         parse_mode="HTML"
     )
 
 
 def _process_phone_input(message, chat_id):
-    """Procesa teléfono (Paso 3)"""
+    """Paso 3: Teléfono"""
     if not message.text:
-        bot.send_message(chat_id, "❌ Necesito un número de teléfono:")
+        bot.send_message(chat_id, "❌ Necesito un número:")
         return
     
     phone = re.sub(r"\D", "", message.text)
     
     if len(phone) < 8:
-        bot.send_message(chat_id, "❌ Número muy corto. Incluí código de área:")
+        bot.send_message(chat_id, "❌ Muy corto. Incluí código de área:")
         return
     
     UserSession.update(chat_id, worker_phone=phone)
@@ -338,15 +322,15 @@ def _process_phone_input(message, chat_id):
     bot.send_message(
         chat_id,
         f"📱 <b>Teléfono:</b> {formatted}\n\n"
-        f"🆔 <b>Paso 4/5</b>\n¿Cuál es tu número de DNI?",
+        f"🆔 <b>Paso 4/5</b>\n¿Cuál es tu DNI?",
         parse_mode="HTML"
     )
 
 
 def _process_dni_input(message, chat_id):
-    """Procesa DNI (Paso 4)"""
+    """Paso 4: DNI"""
     if not message.text:
-        bot.send_message(chat_id, "❌ Necesito el número de DNI:")
+        bot.send_message(chat_id, "❌ Necesito el DNI:")
         return
     
     dni = re.sub(r"\D", "", message.text)
@@ -360,23 +344,22 @@ def _process_dni_input(message, chat_id):
         UserSession.set(chat_id, WorkerStates.SHARING_LOCATION)
         _request_location(chat_id)
     except Exception as e:
-        logger.error(f"[DNI SAVE ERROR] {chat_id}: {e}")
-        bot.send_message(
-            chat_id,
-            f"{Icons.ERROR} Error guardando datos. Intentá /start"
-        )
+        logger.error(f"[DNI ERROR] {chat_id}: {e}")
+        bot.send_message(chat_id, f"{Icons.ERROR} Error. Intentá /start")
 
 
 def _save_worker_to_db(chat_id, dni):
-    """Guarda datos básicos del worker"""
-    session_data = UserSession.get(chat_id).get("data", {})
+    """Guarda worker en BD"""
+    # Obtener datos de sesión
+    session = UserSession.get(chat_id)
+    data = session.get("data", {})
     
-    name = session_data.get("worker_name")
-    phone = session_data.get("worker_phone")
-    services = session_data.get("selected_services", [])
+    name = data.get("worker_name")
+    phone = data.get("worker_phone")
+    services = data.get("selected_services", [])
     
     if not name or not phone:
-        raise ValueError("Faltan datos obligatorios")
+        raise ValueError("Faltan datos")
     
     now = int(time.time())
     
@@ -401,11 +384,11 @@ def _save_worker_to_db(chat_id, dni):
                 (str(chat_id), svc_id)
             )
     
-    logger.info(f"[WORKER DB] Datos guardados para {chat_id}")
+    logger.info(f"[WORKER SAVED] {chat_id}")
 
 
 def _request_location(chat_id):
-    """Solicita ubicación (Paso 5)"""
+    """Paso 5: Ubicación"""
     markup = types.ReplyKeyboardMarkup(
         resize_keyboard=True,
         one_time_keyboard=True,
@@ -422,15 +405,15 @@ def _request_location(chat_id):
     bot.send_message(
         chat_id,
         "📍 <b>Paso 5/5 - Ubicación</b>\n\n"
-        "Compartí tu ubicación para que los clientes te encuentren.\n\n"
-        "<i>Tocá el botón de abajo 👇</i>",
+        "Compartí tu ubicación para que te encuentren.\n\n"
+        "<i>Tocá el botón 👇</i>",
         parse_mode="HTML",
         reply_markup=markup
     )
 
 
 def _process_location_text(message, chat_id):
-    """Procesa texto cuando se espera ubicación"""
+    """Texto cuando se espera ubicación"""
     if message.text and "cancelar" in message.text.lower():
         UserSession.clear(chat_id)
         db_execute(
@@ -440,7 +423,7 @@ def _process_location_text(message, chat_id):
         
         bot.send_message(
             chat_id,
-            "❌ <b>Registro cancelado</b>\n\nPodés reiniciar con /start",
+            "❌ <b>Registro cancelado</b>\n\nReiniciá con /start",
             parse_mode="HTML",
             reply_markup=types.ReplyKeyboardRemove()
         )
@@ -449,12 +432,11 @@ def _process_location_text(message, chat_id):
     bot.send_message(
         chat_id,
         "⚠️ <b>Se requiere ubicación</b>\n\n"
-        "Usá el botón <b>📍 Enviar mi ubicación actual</b>\n"
-        "O tocá <b>❌ Cancelar registro</b>",
+        "Usá <b>📍 Enviar ubicación</b> o <b>❌ Cancelar</b>",
         parse_mode="HTML"
     )
 
-# ==================== HANDLER DE UBICACIÓN ====================
+# ==================== UBICACIÓN ====================
 
 @bot.message_handler(content_types=["location"])
 def handle_location_shared(message):
@@ -470,14 +452,6 @@ def handle_location_shared(message):
         lat = message.location.latitude
         lon = message.location.longitude
         
-        # Validar coordenadas aproximadas de Argentina
-        if not (-55 <= lat <= -20 and -75 <= lon <= -50):
-            bot.send_message(
-                chat_id,
-                "⚠️ Ubicación fuera de Argentina. ¿Es correcta?",
-                reply_markup=types.ReplyKeyboardRemove()
-            )
-        
         # Activar worker
         db_execute(
             "UPDATE workers SET lat = ?, lon = ?, is_active = 1 WHERE chat_id = ?",
@@ -490,13 +464,12 @@ def handle_location_shared(message):
             chat_id,
             "🎉 <b>¡Registro completado!</b>\n\n"
             "Tu perfil está activo y visible.\n"
-            f"Coordenadas: {lat:.4f}, {lon:.4f}\n\n"
-            "Usá /menu para ver opciones.",
+            f"📍 {lat:.4f}, {lon:.4f}",
             parse_mode="HTML",
             reply_markup=types.ReplyKeyboardRemove()
         )
         
-        logger.info(f"[WORKER COMPLETE] {chat_id}")
+        logger.info(f"[COMPLETE] {chat_id}")
         
     except Exception as e:
         logger.error(f"[LOCATION ERROR] {chat_id}: {e}")
