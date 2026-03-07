@@ -146,6 +146,7 @@ def _build_service_markup(selected_services):
 @bot.callback_query_handler(func=lambda c: c.data.startswith("svc_toggle:"))
 def handle_service_toggle(call):
     """Toggle de servicios"""
+    # CORREGIDO: call.message.chat.id (no chat_id)
     chat_id = call.message.chat.id
     message_id = call.message.message_id
     
@@ -222,7 +223,8 @@ def _markup_equal(markup1, markup2):
 @bot.callback_query_handler(func=lambda c: c.data == "svc_confirm")
 def handle_service_confirm(call):
     """Confirmación de servicios"""
-    chat_id = call.message.chat_id
+    # CORREGIDO: call.message.chat.id (no chat_id)
+    chat_id = call.message.chat.id
     
     try:
         selected = UserSession.get_data(chat_id, "selected_services", [])
