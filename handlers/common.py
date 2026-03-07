@@ -138,16 +138,13 @@ Conectamos personas que necesitan servicios con profesionales confiables cerca d
 
     # ================= MENU PRINCIPAL =================
 
-    @bot.message_handler(content_types=["text"])
+    @bot.message_handler(
+        func=lambda message: get_state(message.chat.id) == UserState.SELECTING_ROLE.value,
+        content_types=["text"]
+    )
     def handle_main_menu(message):
 
         chat_id = message.chat.id
-        state = get_state(chat_id)
-
-        # 🔴 Si el usuario está en un flujo, el menú no responde
-        if state != UserState.SELECTING_ROLE.value:
-            return
-
         text = message.text.strip().lower()
 
         logger.info(f"[MENU] Texto recibido: {text} | chat_id={chat_id}")
