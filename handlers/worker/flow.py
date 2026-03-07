@@ -19,7 +19,9 @@ logger = logging.getLogger(__name__)
 apihelper.SESSION_TIME_TO_LIVE = 10 * 60
 
 # ==================== SESIONES EN SQLITE ====================
+# ==================== SESIONES EN SQLITE ====================
 def get_session(chat_id: str):
+
     row = db_execute(
         "SELECT state, data FROM sessions WHERE chat_id = ?",
         (str(chat_id),),
@@ -27,15 +29,35 @@ def get_session(chat_id: str):
     )
 
     if row:
+
         state, data_json = row
+
         try:
             data = json.loads(data_json) if data_json else {}
+
         except Exception:
-            logger.error(f"[SESSION] JSON corrupto para {chat_id}")
-            data = {}
+
+            logger.error(f"[SESSION] JSON corrupto para {chat_id} - reiniciando sesión")
+
+            db_execute(
+                "UPDATE sessions SET state='IDLE', data='{}', last_activity=? WHERE chat_id=?",
+                (int(time.time()), str(chat_id)),
+                commit=True
+            )
+
+            return {"state": "IDLE", "data": {}}
 
         return {"state": state, "data": data}
 
+    else:
+
+        db_execute(
+            "INSERT INTO sessions (chat_id, state, data, last_activity) VALUES (?, ?, ?, ?)",
+            (str(chat_id), "IDLE", "{}", int(time.time())),
+            commit=True
+        )
+
+        return {"state": "IDLE", "data": {}}
     else:
         db_execute(
             "INSERT INTO sessions (chat_id, state, data, last_activity) VALUES (?, ?, ?, ?)",
