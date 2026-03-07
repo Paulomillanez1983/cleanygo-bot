@@ -157,7 +157,6 @@ def start_worker_flow(chat_id: int):
             return
 
         set_state(chat_id, "WORKER_SELECTING_SERVICES", {"selected_services": []})
-
         text = (
             f"{Icons.BRIEFCASE} <b>Registro de Profesional</b>\n\n"
             f"Vamos a configurar tu perfil paso a paso.\n\n"
