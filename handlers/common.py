@@ -1,73 +1,32 @@
+"""
+Common handlers - Start, cancel, help, menú principal
+"""
 import asyncio
 import logging
-from telebot import types, apihelper
+from telebot import types
 
-from config import bot, logger, notify_client
+# CAMBIO: importar get_bot en lugar de bot
+from config import logger, get_bot, notify_client
 from models.user_state import (
-    set_state, update_data, get_data, get_session, clear_state, UserState
+    set_state, update_data, get_data, clear_state, UserState
 )
 from models.services_data import SERVICES
 from utils.icons import Icons
-from utils.keyboards import (
-    get_time_selector,
-    get_location_keyboard,
-    get_confirmation_keyboard,
-    get_role_keyboard
-)
-from utils.telegram_safe import send_safe, edit_safe, delete_safe, remove_keyboard
+from utils.keyboards import get_role_keyboard
+
+# NUEVO: obtener instancia del bot
+bot = get_bot()
 
 logger = logging.getLogger(__name__)
-
-
-# ==================== AUXILIARES ====================
-def safe_json(data):
-    if isinstance(data, dict):
-        return {k: safe_json(v) for k, v in data.items()}
-    elif isinstance(data, list):
-        return [safe_json(x) for x in data]
-    elif isinstance(data, (str, int, float, type(None))):
-        return data
-    else:
-        return str(data)
-
-
-def debug_session(chat_id: str, label: str):
-    try:
-        session = get_session(chat_id)
-        logger.info(f"[DEBUG {label}] chat_id={chat_id}, session={session}")
-        return session
-    except Exception as e:
-        logger.error(f"[DEBUG {label}] ERROR: {e}")
-        return {"state": "error", "data": {}}
-
-
-def save_state_and_data(chat_id: str, state: UserState, data_updates: dict = None):
-    chat_id = str(chat_id)
-    if data_updates:
-        update_data(chat_id, **safe_json(data_updates))
-    set_state(chat_id, state.value)
-    logger.info(f"[STATE] chat_id={chat_id} -> {state.value}")
-
-
-def get_service_display(service_id: str, with_price: bool = False) -> str:
-    svc = SERVICES.get(service_id, {})
-    text = f"{svc.get('icon','🔹')} <b>{svc.get('name', service_id)}</b>"
-    if with_price:
-        # Evitar import circular
-        from handlers.worker import jobs as worker_jobs
-        price = worker_jobs.SERVICES_PRICES.get(service_id, {}).get("price", 0)
-        text += f"\n<code>${price}</code>"
-    return text
 
 
 # ==================== HANDLERS COMUNES ====================
 
 @bot.message_handler(commands=["start"])
 def cmd_start(message):
-    """Handler de inicio - Limpia estado y muestra menú principal"""
+    """Handler de inicio"""
     chat_id = str(message.chat.id)
     
-    # Limpiar estado usando el sistema unificado
     clear_state(chat_id)
 
     welcome_text = f"""
@@ -78,7 +37,7 @@ Conectamos personas que necesitan servicios con profesionales confiables cerca d
 <b>¿Qué necesitás hacer?</b>
 """
 
-    send_safe(bot, chat_id, welcome_text, get_role_keyboard())
+    send_safe(chat_id, welcome_text, get_role_keyboard())
     set_state(chat_id, UserState.SELECTING_ROLE.value)
 
     logger.info(f"[START] Usuario inició bot | chat_id={chat_id}")
@@ -92,7 +51,6 @@ def cmd_cancel(message):
     clear_state(chat_id)
 
     send_safe(
-        bot,
         chat_id,
         f"{Icons.SUCCESS} Cancelado. Usá /start para comenzar de nuevo."
     )
@@ -119,7 +77,7 @@ def cmd_help(message):
 @soporte_cleanygo
 """
 
-    send_safe(bot, message.chat.id, text)
+    send_safe(message.chat.id, text)
 
 
 # ==================== MENU PRINCIPAL ====================
@@ -153,15 +111,15 @@ def handle_main_menu(message):
         return
 
     send_safe(
-        bot,
         chat_id,
         f"{Icons.INFO} No entendí esa opción. Usá el menú o escribí /start."
     )
 
 
-# ==================== SAFE UTILS (movidos aquí para evitar circular imports) ====================
+# ==================== SAFE UTILS ====================
 
-def send_safe(bot, chat_id, text, reply_markup=None, parse_mode="HTML"):
+def send_safe(chat_id, text, reply_markup=None, parse_mode="HTML"):
+    """Envía mensaje de forma segura"""
     try:
         return bot.send_message(
             chat_id,
@@ -174,7 +132,8 @@ def send_safe(bot, chat_id, text, reply_markup=None, parse_mode="HTML"):
         return None
 
 
-def edit_safe(bot, chat_id, message_id, text, reply_markup=None):
+def edit_safe(chat_id, message_id, text, reply_markup=None):
+    """Edita mensaje de forma segura"""
     try:
         return bot.edit_message_text(
             text,
@@ -188,14 +147,16 @@ def edit_safe(bot, chat_id, message_id, text, reply_markup=None):
         return None
 
 
-def delete_safe(bot, chat_id, message_id):
+def delete_safe(chat_id, message_id):
+    """Elimina mensaje de forma segura"""
     try:
         bot.delete_message(chat_id, message_id)
     except Exception as e:
         logger.error(f"[DELETE ERROR] {e} | message_id={message_id}")
 
 
-def remove_keyboard(bot, chat_id, text="Procesando..."):
+def remove_keyboard(chat_id, text="Procesando..."):
+    """Remueve teclado de forma segura"""
     try:
         bot.send_message(
             chat_id,
