@@ -1,5 +1,5 @@
 """
-Worker registration flow - Versión corregida y unificada con UserState Enum
+Worker flow - Registro de trabajadores
 """
 import os
 import time
@@ -8,11 +8,16 @@ import json
 import traceback
 from telebot import types, apihelper
 
-from config import bot, logger
+# CAMBIO: usar get_bot
+from config import logger, get_bot
 from models.user_state import set_state, update_data, get_data, clear_state, UserState
 from models.services_data import SERVICES
+from utils.icons import Icons
 from handlers.common import send_safe
 from services.worker_service import db_execute
+
+# NUEVO: obtener bot
+bot = get_bot()
 
 # ==================== CONFIGURACIÓN ====================
 apihelper.SESSION_TIME_TO_LIVE = 10 * 60
