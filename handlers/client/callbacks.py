@@ -1,4 +1,12 @@
-from telebot import types
+"""
+Client callbacks - Todos los callbacks del cliente
+confirm_yes, cancel_req, retry_search, alt_times, change_time, back_start
+"""
+import os
+import time
+import traceback
+from telebot import types, apihelper
+
 from config import bot, logger
 from models.user_state import set_state, update_data, get_data, clear_state, UserState
 from models.services_data import SERVICES
@@ -11,7 +19,7 @@ from handlers.client.search import generate_no_availability_message, notify_work
 
 
 # =========================================================
-# CONFIRMAR SOLICITUD
+# CONFIRMAR SOLICITUD (callback_data="confirm_yes")
 # =========================================================
 
 @bot.callback_query_handler(func=lambda c: c.data == "confirm_yes")
@@ -22,18 +30,18 @@ def handle_confirm_request(call):
     # Recuperar datos de la sesión
     service_id = get_data(chat_id, "service_id")
     time_str = get_data(chat_id, "selected_time")
-    period = get_data(chat_id, "time_period")
+    period = get_data(chat_id, "time_period") or "PM"
     lat = get_data(chat_id, "lat")
     lon = get_data(chat_id, "lon")
 
     # Validar datos requeridos
     if not all([service_id, time_str, lat, lon]):
-        logger.error(f"[CONFIRM] Datos incompletos: service_id={service_id}, time={time_str}, lat={lat}, lon={lon}")
+        logger.error(f"[CONFIRM] Datos incompletos en chat_id={chat_id}")
         bot.answer_callback_query(call.id, "❌ Error: Datos incompletos. Empezá de nuevo.", show_alert=True)
         handle_back_start(call)
         return
 
-    hora_completa = f"{time_str} {period}" if period else time_str
+    hora_completa = f"{time_str} {period}"
 
     # Crear solicitud en BD
     request_id = create_request(chat_id, service_id, hora_completa, lat, lon, 'searching')
@@ -60,7 +68,6 @@ def handle_confirm_request(call):
     try:
         result = find_available_workers(service_id, lat, lon, hora_completa)
         
-        # Manejar diferentes formatos de retorno
         if not result:
             workers, status, extra = [], "error", None
         elif isinstance(result, tuple) and len(result) >= 3:
@@ -115,9 +122,8 @@ def handle_confirm_request(call):
             notified += 1
             logger.info(f"[CONFIRM] Notificado trabajador {worker[0]} para request {request_id}")
         except Exception as e:
-            error_msg = f"Error notificando a {worker[0]}: {e}"
-            logger.error(f"[CONFIRM] {error_msg}")
-            notification_errors.append(error_msg)
+            logger.error(f"[CONFIRM] Error notificando a {worker[0]}: {e}")
+            notification_errors.append(str(e))
 
     # Actualizar estado de la solicitud
     update_request_status(request_id, 'waiting_acceptance')
@@ -149,11 +155,11 @@ def handle_confirm_request(call):
     )
 
     edit_safe(chat_id, call.message.message_id, waiting_text, markup)
-    logger.info(f"[CONFIRM] Solicitud {request_id} creada exitosamente. Notified={notified}, Errors={len(notification_errors)}")
+    logger.info(f"[CONFIRM] Solicitud {request_id} creada. Notified={notified}")
 
 
 # =========================================================
-# CANCELAR SOLICITUD (FALTABA)
+# CANCELAR SOLICITUD (callback_data="cancel_req:")
 # =========================================================
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("cancel_req:"))
@@ -229,7 +235,7 @@ Tu solicitud #{request_id} ha sido cancelada correctamente.
 
 
 # =========================================================
-# REINTENTAR BUSQUEDA
+# REINTENTAR BUSQUEDA (callback_data="retry_search:")
 # =========================================================
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("retry_search:"))
@@ -294,13 +300,11 @@ def handle_retry_search(call):
     except Exception as e:
         logger.error(f"[RETRY] Error en handle_confirm_request: {e}")
         bot.answer_callback_query(call.id, "❌ Error al reintentar", show_alert=True)
-        
-        # Fallback: volver al inicio
         handle_back_start(call)
 
 
 # =========================================================
-# HORARIOS ALTERNATIVOS
+# HORARIOS ALTERNATIVOS (callback_data="alt_times:")
 # =========================================================
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("alt_times:"))
@@ -344,7 +348,7 @@ Seleccioná otro horario:
 
 
 # =========================================================
-# CAMBIAR HORA
+# CAMBIAR HORA (callback_data="change_time:")
 # =========================================================
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("change_time:"))
@@ -387,7 +391,7 @@ def handle_change_time(call):
 
 
 # =========================================================
-# VOLVER AL INICIO
+# VOLVER AL INICIO (callback_data="back_start")
 # =========================================================
 
 @bot.callback_query_handler(func=lambda c: c.data == "back_start")
@@ -417,7 +421,6 @@ Conectamos personas que necesitan servicios con profesionales confiables cerca d
         )
     except Exception as e:
         logger.error(f"[BACK_START] Error editando mensaje: {e}")
-        # Si falla la edición, enviar mensaje nuevo
         send_safe(chat_id, welcome_text, get_role_keyboard())
 
     set_state(chat_id, UserState.SELECTING_ROLE)
@@ -425,7 +428,7 @@ Conectamos personas que necesitan servicios con profesionales confiables cerca d
 
 
 # =========================================================
-# NUEVA SOLICITUD (Helper para cancel_req)
+# NUEVA SOLICITUD (callback_data="new_request")
 # =========================================================
 
 @bot.callback_query_handler(func=lambda c: c.data == "new_request")
@@ -439,31 +442,14 @@ def handle_new_request(call):
     clear_state(chat_id)
     
     # Redirigir a flujo de selección de servicio
-    # Asumiendo que tienes esta función en client/flow.py
-    try:
-        from handlers.client.flow import handle_hire_service
-        # Simular un mensaje de texto o callback para iniciar el flujo
-        handle_hire_service(call.message)
-    except Exception as e:
-        logger.error(f"[NEW_REQUEST] Error iniciando flujo: {e}")
-        # Fallback: mostrar menú de roles
-        handle_back_start(call)
+    from handlers.client.flow import start_client_flow
+    start_client_flow(chat_id)
 
 
 # =========================================================
-# COMPATIBILIDAD CON BOT.PY
+# COMPATIBILIDAD
 # =========================================================
 
 def register_handlers():
-    """
-    Telebot registra handlers automáticamente con decoradores.
-    Esta función existe para compatibilidad y logging.
-    """
-    logger.info("✅ Client callbacks registrados correctamente")
-    logger.info("   - confirm_yes")
-    logger.info("   - cancel_req:")
-    logger.info("   - retry_search:")
-    logger.info("   - alt_times:")
-    logger.info("   - change_time:")
-    logger.info("   - back_start")
-    logger.info("   - new_request")
+    """Telebot registra handlers automáticamente con decoradores"""
+    logger.info("✅ Client callbacks registrados")
