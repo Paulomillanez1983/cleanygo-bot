@@ -1,13 +1,13 @@
 """
 Client callbacks - Todos los callbacks del cliente
-confirm_yes, cancel_req, retry_search, alt_times, change_time, back_start
 """
 import os
 import time
 import traceback
 from telebot import types, apihelper
 
-from config import bot, logger
+# CAMBIO: usar get_bot
+from config import logger, get_bot
 from models.user_state import set_state, update_data, get_data, clear_state, UserState
 from models.services_data import SERVICES
 from utils.icons import Icons
@@ -15,6 +15,10 @@ from utils.keyboards import get_alternative_times_keyboard, get_role_keyboard
 from services.worker_service import find_available_workers
 from services.request_service import create_request, update_request_status, get_request, db_execute
 from handlers.common import send_safe, edit_safe, remove_keyboard
+
+# NUEVO: obtener bot
+bot = get_bot()
+
 from handlers.client.search import generate_no_availability_message, notify_worker
 
 
