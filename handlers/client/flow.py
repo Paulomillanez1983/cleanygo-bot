@@ -1,11 +1,11 @@
 """
 Client flow - Solo flujo de mensajes, NO callbacks
-Los callbacks están en client/callbacks.py
 """
 import logging
 from telebot import types
 
-from config import bot, logger
+# CAMBIO: usar get_bot
+from config import logger, get_bot
 from models.user_state import (
     set_state, update_data, get_data, clear_state, UserState
 )
@@ -17,6 +17,9 @@ from utils.keyboards import (
     get_confirmation_keyboard
 )
 from handlers.common import send_safe, edit_safe, delete_safe, remove_keyboard
+
+# NUEVO: obtener bot
+bot = get_bot()
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +51,7 @@ def start_client_flow(chat_id):
             )
         )
 
-    send_safe(bot, chat_id, text, markup)
+    send_safe(chat_id, text, markup)
     logger.info(f"[CLIENT FLOW] Iniciado | chat_id={chat_id}")
 
 
@@ -72,7 +75,7 @@ def handle_client_service_selection(call):
         f"Servicio: {get_service_display(service_id)}"
     )
 
-    edit_safe(bot, chat_id, call.message.message_id, text, get_time_selector())
+    edit_safe(chat_id, call.message.message_id, text, get_time_selector())
 
 
 # ==================== TIEMPO ====================
@@ -106,7 +109,7 @@ def handle_time_hour(call):
             callback_data=f"time_m:{hour}:{minute}"
         ))
     
-    edit_safe(bot, chat_id, call.message.message_id, 
+    edit_safe(chat_id, call.message.message_id, 
               f"{Icons.CLOCK} Seleccioná los minutos:", markup)
 
 
@@ -134,7 +137,7 @@ def proceed_to_location(chat_id: str, message_id: int):
     time_str = get_data(chat_id, "selected_time")
 
     if not service_id:
-        send_safe(bot, chat_id, f"{Icons.ERROR} Error: sesión expirada. Usá /start.")
+        send_safe(chat_id, f"{Icons.ERROR} Error: sesión expirada. Usá /start.")
         return
 
     set_state(chat_id, UserState.CLIENT_SHARING_LOCATION.value)
@@ -148,8 +151,8 @@ Hora: {time_str} PM
 Enviá tu ubicación.
 """
 
-    delete_safe(bot, chat_id, message_id)
-    send_safe(bot, chat_id, text, get_location_keyboard())
+    delete_safe(chat_id, message_id)
+    send_safe(chat_id, text, get_location_keyboard())
 
 
 def _is_client_sharing_location(message):
@@ -168,7 +171,7 @@ def handle_client_location(message):
     time_str = get_data(chat_id, "selected_time")
 
     update_data(chat_id, lat=lat, lon=lon)
-    remove_keyboard(bot, chat_id, "✅ Ubicación recibida")
+    remove_keyboard(chat_id, "✅ Ubicación recibida")
     set_state(chat_id, UserState.CLIENT_CONFIRMING.value)
 
     text = f"""
@@ -180,5 +183,5 @@ Ubicación: {lat:.4f}, {lon:.4f}
 
 ¿Todo correcto?
 """
-    send_safe(bot, chat_id, text, get_confirmation_keyboard())
+    send_safe(chat_id, text, get_confirmation_keyboard())
     # 👆 Este teclado tiene callback_data="confirm_yes" que maneja client/callbacks.py
