@@ -1,28 +1,19 @@
 """
-Worker registration flow - Versión corregida y unificada
-Usa ÚNICAMENTE UserSession desde config
+Worker registration flow - Versión corregida para compatibilidad con config
+Usa el mismo sistema de estados que client (models.user_state)
 """
 import os
 import time
 import re
 import json
-import logging
 import traceback
 from telebot import types, apihelper
 
-# Importar todo desde database (que re-exporta desde config)
-from database import (
-    get_bot,
-    db_execute,
-    Icons,
-    logger,
-    UserSession,  # <-- USAR ESTO EXCLUSIVAMENTE
-)
-
-bot = get_bot()
-
+from config import bot, logger
+from models.user_state import set_state, update_data, get_data, clear_state, UserState
 from models.services_data import SERVICES
-from models.states import UserState
+from handlers.common import send_safe
+from services.worker_service import db_execute
 
 # ==================== CONFIGURACIÓN ====================
 apihelper.SESSION_TIME_TO_LIVE = 10 * 60
@@ -61,8 +52,8 @@ def start_worker_flow(chat_id):
             return
 
         # Limpiar y empezar
-        UserSession.clear(chat_id)
-        UserSession.set(chat_id, WorkerStates.SELECTING_SERVICES, {
+        clear_state(chat_id)
+        set_state(chat_id, WorkerStates.SELECTING_SERVICES, {
             "selected_services": [],
             "flow_started_at": int(time.time())
         })
@@ -79,7 +70,7 @@ def start_worker_flow(chat_id):
     func=lambda m: (
         m.text
         and "trabajar" in m.text.lower()
-        and UserSession.get(m.chat.id).get("state") == UserState.SELECTING_ROLE.value
+        and get_data(m.chat.id, "state") == UserState.SELECTING_ROLE.value
     )
 )
 def handle_worker_start(message):
@@ -144,7 +135,7 @@ def handle_service_toggle(call):
             return
 
         service_id = parts[1]
-        selected = UserSession.get_data(chat_id, "selected_services", [])
+        selected = get_data(chat_id, "selected_services") or []
         if not isinstance(selected, list):
             selected = []
 
@@ -156,7 +147,7 @@ def handle_service_toggle(call):
             selected.append(service_id)
             action_text = "seleccionado"
 
-        UserSession.update(chat_id, selected_services=selected)
+        update_data(chat_id, selected_services=selected)
 
         # Actualizar UI
         new_markup = _build_service_markup(selected)
@@ -203,7 +194,7 @@ def _markup_equal(markup1, markup2):
 def handle_service_confirm(call):
     chat_id = call.message.chat.id
     try:
-        selected = UserSession.get_data(chat_id, "selected_services", [])
+        selected = get_data(chat_id, "selected_services") or []
         if not selected:
             bot.answer_callback_query(call.id, "⚠️ Seleccioná al menos un servicio", show_alert=True)
             return
@@ -214,7 +205,7 @@ def handle_service_confirm(call):
             logger.debug(f"[CONFIRM] No se pudo borrar: {e}")
 
         # Avanzar estado sin perder data
-        UserSession.update(chat_id, state=WorkerStates.ENTERING_NAME)
+        update_data(chat_id, state=WorkerStates.ENTERING_NAME)
 
         bot.send_message(
             chat_id,
@@ -228,11 +219,10 @@ def handle_service_confirm(call):
         bot.answer_callback_query(call.id, "Error", show_alert=True)
 
 # ===================== DISPATCHER CENTRALIZADO =====================
-@bot.message_handler(func=lambda m: UserSession.get(m.chat.id).get("state") in ACTIVE_WORKER_STATES)
+@bot.message_handler(func=lambda m: get_data(m.chat.id, "state") in ACTIVE_WORKER_STATES)
 def worker_flow_dispatcher(message):
     chat_id = message.chat.id
-    session = UserSession.get(chat_id)
-    current_state = session.get("state")
+    current_state = get_data(chat_id, "state")
 
     logger.info(f"[DISPATCHER] chat_id={chat_id} | state={current_state}")
 
@@ -263,7 +253,7 @@ def _process_name_input(message, chat_id):
         bot.send_message(chat_id, "❌ Nombre muy largo:")
         return
 
-    UserSession.update(chat_id, worker_name=text, state=WorkerStates.ENTERING_PHONE)
+    update_data(chat_id, worker_name=text, state=WorkerStates.ENTERING_PHONE)
     bot.send_message(
         chat_id,
         f"👤 <b>Nombre:</b> {text}\n\n📱 <b>Paso 3/5</b>\n¿Cuál es tu teléfono?",
@@ -280,7 +270,7 @@ def _process_phone_input(message, chat_id):
         bot.send_message(chat_id, "❌ Muy corto. Incluí código de área:")
         return
 
-    UserSession.update(chat_id, worker_phone=phone, state=WorkerStates.ENTERING_DNI)
+    update_data(chat_id, worker_phone=phone, state=WorkerStates.ENTERING_DNI)
     formatted = f"{phone[:2]} {phone[2:6]}-{phone[6:]}" if len(phone) >= 8 else phone
     bot.send_message(
         chat_id,
@@ -298,10 +288,10 @@ def _process_dni_input(message, chat_id):
         bot.send_message(chat_id, "❌ DNI inválido (7-10 dígitos):")
         return
 
-    UserSession.update(chat_id, worker_dni=dni)
+    update_data(chat_id, worker_dni=dni)
     try:
         _save_worker_to_db(chat_id, dni)
-        UserSession.update(chat_id, state=WorkerStates.SHARING_LOCATION)
+        update_data(chat_id, state=WorkerStates.SHARING_LOCATION)
         _request_location(chat_id)
     except Exception as e:
         logger.error(f"[DNI ERROR] {chat_id}: {e}")
@@ -309,12 +299,9 @@ def _process_dni_input(message, chat_id):
 
 # ===================== GUARDAR WORKER EN DB =====================
 def _save_worker_to_db(chat_id, dni):
-    session = UserSession.get(chat_id)
-    data = session.get("data", {})
-
-    name = data.get("worker_name")
-    phone = data.get("worker_phone")
-    services = data.get("selected_services", [])
+    name = get_data(chat_id, "worker_name")
+    phone = get_data(chat_id, "worker_phone")
+    services = get_data(chat_id, "selected_services") or []
 
     if not name or not phone or not dni:
         raise ValueError("Faltan datos completos para guardar worker")
@@ -351,7 +338,7 @@ def _request_location(chat_id):
 
 def _process_location_text(message, chat_id):
     if message.text and "cancelar" in message.text.lower():
-        UserSession.clear(chat_id)
+        clear_state(chat_id)
         db_execute("DELETE FROM workers WHERE chat_id = ? AND is_active = 0", (str(chat_id),))
         bot.send_message(
             chat_id,
@@ -370,8 +357,8 @@ def _process_location_text(message, chat_id):
 @bot.message_handler(content_types=["location"])
 def handle_location_shared(message):
     chat_id = message.chat.id
-    session = UserSession.get(chat_id)
-    if session.get("state") != WorkerStates.SHARING_LOCATION:
+    current_state = get_data(chat_id, "state")
+    if current_state != WorkerStates.SHARING_LOCATION:
         return
 
     try:
@@ -383,7 +370,7 @@ def handle_location_shared(message):
             (lat, lon, str(chat_id))
         )
 
-        UserSession.clear(chat_id)
+        clear_state(chat_id)
         bot.send_message(
             chat_id,
             f"🎉 <b>¡Registro completado!</b>\n\nTu perfil está activo y visible.\n📍 {lat:.4f}, {lon:.4f}",
@@ -398,4 +385,4 @@ def handle_location_shared(message):
             chat_id,
             f"{Icons.ERROR} Error guardando ubicación.",
             reply_markup=types.ReplyKeyboardRemove()
-    )
+        )
