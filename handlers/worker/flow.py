@@ -1,6 +1,5 @@
 """
-Worker registration flow - Versión corregida para compatibilidad con config
-Usa el mismo sistema de estados que client (models.user_state)
+Worker registration flow - Versión corregida y unificada con UserState Enum
 """
 import os
 import time
@@ -18,20 +17,14 @@ from services.worker_service import db_execute
 # ==================== CONFIGURACIÓN ====================
 apihelper.SESSION_TIME_TO_LIVE = 10 * 60
 
-# ==================== CONSTANTES ====================
-class WorkerStates:
-    SELECTING_SERVICES = "WORKER_SELECTING_SERVICES"
-    ENTERING_NAME = "WORKER_ENTERING_NAME"
-    ENTERING_PHONE = "WORKER_ENTERING_PHONE"
-    ENTERING_DNI = "WORKER_ENTERING_DNI"
-    SHARING_LOCATION = "WORKER_SHARING_LOCATION"
-
+# ==================== CONSTANTES DE ESTADOS ACTIVOS ====================
+# Usamos los valores del Enum directamente
 ACTIVE_WORKER_STATES = [
-    WorkerStates.SELECTING_SERVICES,
-    WorkerStates.ENTERING_NAME,
-    WorkerStates.ENTERING_PHONE,
-    WorkerStates.ENTERING_DNI,
-    WorkerStates.SHARING_LOCATION,
+    UserState.WORKER_SELECTING_SERVICES.value,
+    UserState.WORKER_ENTERING_NAME.value,
+    UserState.WORKER_ENTERING_PHONE.value,
+    UserState.WORKER_ENTERING_DNI.value,
+    UserState.WORKER_SHARING_LOCATION.value,
 ]
 
 # ===================== FUNCIÓN PÚBLICA =====================
@@ -53,7 +46,7 @@ def start_worker_flow(chat_id):
 
         # Limpiar y empezar
         clear_state(chat_id)
-        set_state(chat_id, WorkerStates.SELECTING_SERVICES, {
+        set_state(chat_id, UserState.WORKER_SELECTING_SERVICES.value, {
             "selected_services": [],
             "flow_started_at": int(time.time())
         })
@@ -205,7 +198,7 @@ def handle_service_confirm(call):
             logger.debug(f"[CONFIRM] No se pudo borrar: {e}")
 
         # Avanzar estado sin perder data
-        update_data(chat_id, state=WorkerStates.ENTERING_NAME)
+        update_data(chat_id, state=UserState.WORKER_ENTERING_NAME.value)
 
         bot.send_message(
             chat_id,
@@ -227,15 +220,15 @@ def worker_flow_dispatcher(message):
     logger.info(f"[DISPATCHER] chat_id={chat_id} | state={current_state}")
 
     try:
-        if current_state == WorkerStates.ENTERING_NAME:
+        if current_state == UserState.WORKER_ENTERING_NAME.value:
             _process_name_input(message, chat_id)
-        elif current_state == WorkerStates.ENTERING_PHONE:
+        elif current_state == UserState.WORKER_ENTERING_PHONE.value:
             _process_phone_input(message, chat_id)
-        elif current_state == WorkerStates.ENTERING_DNI:
+        elif current_state == UserState.WORKER_ENTERING_DNI.value:
             _process_dni_input(message, chat_id)
-        elif current_state == WorkerStates.SHARING_LOCATION:
+        elif current_state == UserState.WORKER_SHARING_LOCATION.value:
             _process_location_text(message, chat_id)
-        elif current_state == WorkerStates.SELECTING_SERVICES:
+        elif current_state == UserState.WORKER_SELECTING_SERVICES.value:
             bot.send_message(chat_id, "⚠️ Usá los botones de arriba")
 
     except Exception as e:
@@ -253,7 +246,7 @@ def _process_name_input(message, chat_id):
         bot.send_message(chat_id, "❌ Nombre muy largo:")
         return
 
-    update_data(chat_id, worker_name=text, state=WorkerStates.ENTERING_PHONE)
+    update_data(chat_id, worker_name=text, state=UserState.WORKER_ENTERING_PHONE.value)
     bot.send_message(
         chat_id,
         f"👤 <b>Nombre:</b> {text}\n\n📱 <b>Paso 3/5</b>\n¿Cuál es tu teléfono?",
@@ -270,7 +263,7 @@ def _process_phone_input(message, chat_id):
         bot.send_message(chat_id, "❌ Muy corto. Incluí código de área:")
         return
 
-    update_data(chat_id, worker_phone=phone, state=WorkerStates.ENTERING_DNI)
+    update_data(chat_id, worker_phone=phone, state=UserState.WORKER_ENTERING_DNI.value)
     formatted = f"{phone[:2]} {phone[2:6]}-{phone[6:]}" if len(phone) >= 8 else phone
     bot.send_message(
         chat_id,
@@ -291,7 +284,7 @@ def _process_dni_input(message, chat_id):
     update_data(chat_id, worker_dni=dni)
     try:
         _save_worker_to_db(chat_id, dni)
-        update_data(chat_id, state=WorkerStates.SHARING_LOCATION)
+        update_data(chat_id, state=UserState.WORKER_SHARING_LOCATION.value)
         _request_location(chat_id)
     except Exception as e:
         logger.error(f"[DNI ERROR] {chat_id}: {e}")
@@ -358,7 +351,7 @@ def _process_location_text(message, chat_id):
 def handle_location_shared(message):
     chat_id = message.chat.id
     current_state = get_data(chat_id, "state")
-    if current_state != WorkerStates.SHARING_LOCATION:
+    if current_state != UserState.WORKER_SHARING_LOCATION.value:
         return
 
     try:
