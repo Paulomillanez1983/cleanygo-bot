@@ -1,12 +1,12 @@
 """
 Common handlers - Start, cancel, help, menú principal
 """
-import asyncio
+import asyncio  # <-- Agregado para compatibilidad
 import logging
 from telebot import types
 
-# CAMBIO: importar get_bot en lugar de bot
-from config import logger, get_bot, notify_client
+# CAMBIO: notify_worker en lugar de notify_client
+from config import logger, get_bot, notify_worker
 from models.user_state import (
     set_state, update_data, get_data, clear_state, UserState
 )
