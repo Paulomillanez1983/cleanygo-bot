@@ -6,9 +6,11 @@ from telebot import types
 
 # CAMBIO: usar get_bot
 from config import logger, get_bot
-from models.user_state import (
-    set_state, update_data, get_data, clear_state, UserState
+# CORREGIDO: Importar funciones desde database y UserState desde models.states
+from database import (
+    set_state, update_data, get_data, clear_state
 )
+from models.states import UserState
 from models.services_data import SERVICES
 from utils.icons import Icons
 from utils.keyboards import (
