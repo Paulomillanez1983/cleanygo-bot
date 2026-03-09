@@ -5,8 +5,7 @@ import asyncio  # <-- Agregado para compatibilidad
 import logging
 from telebot import types
 
-# CAMBIO: notify_worker en lugar de notify_client
-from config import logger, get_bot, notify_worker
+# CORREGIDO: Importar funciones desde config y UserState desde models.states
 from config import logger, get_bot, notify_worker, set_state, update_data, get_data, clear_state
 from models.states import UserState
 from models.services_data import SERVICES
