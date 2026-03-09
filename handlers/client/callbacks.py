@@ -15,7 +15,9 @@ from models.services_data import SERVICES
 from utils.icons import Icons
 from utils.keyboards import get_alternative_times_keyboard, get_role_keyboard
 from services.worker_service import find_available_workers
-from services.request_service import create_request, update_request_status, get_request, db_execute
+from services.request_service import create_request, update_request_status, get_request
+from config import db_execute
+
 from handlers.common import send_safe, edit_safe, remove_keyboard
 
 # NUEVO: obtener bot
