@@ -7,7 +7,7 @@ from telebot import types
 
 # CAMBIO: notify_worker en lugar de notify_client
 from config import logger, get_bot, notify_worker
-from models.user_state import (
+from models.states import (  # ✅ CORREGIDO: era models.user_state
     set_state, update_data, get_data, clear_state, UserState
 )
 from models.services_data import SERVICES
