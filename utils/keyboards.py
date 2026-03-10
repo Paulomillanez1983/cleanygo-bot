@@ -1,9 +1,13 @@
 from telebot import types
 from utils.icons import Icons
-from models.services_data import SERVICES
+# CAMBIO: Importación inline para evitar circular
+# from models.services_data import SERVICES  # MOVIDO A LAS FUNCIONES
 
 def get_role_keyboard():
     """Teclado de selección de rol"""
+    from telebot import types
+    from utils.icons import Icons
+    
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
     markup.add(
         types.KeyboardButton(f"{Icons.BELL} Necesito un servicio"),
@@ -14,11 +18,17 @@ def get_role_keyboard():
 
 def get_cancel_keyboard(text="Cancelar"):
     """Teclado de cancelación"""
+    from telebot import types
+    from utils.icons import Icons
+    
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
     markup.add(types.KeyboardButton(f"{Icons.ERROR} {text}"))
     return markup
 
 def get_location_keyboard(text="📍 Enviar mi ubicación"):
+    from telebot import types
+    from utils.icons import Icons
+    
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
     markup.add(types.KeyboardButton(text, request_location=True))
     markup.add(types.KeyboardButton(f"{Icons.ERROR} Cancelar"))
@@ -26,6 +36,10 @@ def get_location_keyboard(text="📍 Enviar mi ubicación"):
 
 def get_service_selector(selected_services=None):
     """Selector de servicios con toggles"""
+    from telebot import types
+    from utils.icons import Icons
+    from models.services_data import SERVICES  # IMPORT LOCAL
+    
     if selected_services is None:
         selected_services = []
     
@@ -48,6 +62,9 @@ def get_service_selector(selected_services=None):
 
 def get_time_selector():
     """Selector de hora rápida"""
+    from telebot import types
+    from utils.icons import Icons
+    
     markup = types.InlineKeyboardMarkup(row_width=4)
     
     popular_hours = [8, 9, 10, 14, 15, 16, 17, 18]
@@ -65,6 +82,9 @@ def get_time_selector():
     return markup
 
 def get_confirmation_keyboard():
+    from telebot import types
+    from utils.icons import Icons
+    
     markup = types.InlineKeyboardMarkup(row_width=2)
     markup.add(
         types.InlineKeyboardButton(f"{Icons.SUCCESS} Sí, confirmar", callback_data="confirm_yes"),
@@ -74,6 +94,9 @@ def get_confirmation_keyboard():
 
 def get_worker_request_keyboard(request_id: int):
     """Teclado para que worker acepte/rechace solicitud"""
+    from telebot import types
+    from utils.icons import Icons
+    
     markup = types.InlineKeyboardMarkup(row_width=2)
     markup.add(
         types.InlineKeyboardButton(f"{Icons.SUCCESS} Aceptar", callback_data=f"job_accept:{request_id}"),
@@ -84,6 +107,9 @@ def get_worker_request_keyboard(request_id: int):
 
 def get_alternative_times_keyboard(service_id: str, request_id: int):
     """Teclado para horarios alternativos"""
+    from telebot import types
+    from utils.icons import Icons
+    
     horas_posibles = [8, 10, 12, 14, 16, 18, 20]
     
     markup = types.InlineKeyboardMarkup(row_width=3)
