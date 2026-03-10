@@ -33,4 +33,3 @@ class Icons:
     ONLINE = "🟢"
     PARTY = "🎉"
     LOCK = "🔒"
-
