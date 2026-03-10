@@ -4,7 +4,9 @@ VERSIÓN FINAL ESTABLE
 """
 
 from telebot import types
-from config import bot, logger, get_db_connection
+from config import logger, get_db_connection, get_bot
+bot = get_bot()
+
 from models.user_state import set_state, UserState
 from utils.icons import Icons
 from utils.telegram_safe import send_safe, edit_safe
