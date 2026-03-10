@@ -1,18 +1,16 @@
 """
 Worker flow - Registro de trabajadores
 """
-import os
+
 import time
 import re
-import json
 import traceback
 from telebot import types, apihelper
 
 from config import logger, get_bot, db_execute, set_state, get_state, update_data, get_data, clear_state
-from models.states import UserState  # Directo
-from models.services_data import SERVICES  # Directo
-from utils.icons import Icons  # Directo
-from handlers.common import send_safe
+from models.states import UserState
+from models.services_data import SERVICES
+from utils.icons import Icons
 
 bot = get_bot()
 
@@ -26,6 +24,7 @@ ACTIVE_WORKER_STATES = [
     UserState.WORKER_ENTERING_DNI.value,
     UserState.WORKER_SHARING_LOCATION.value,
 ]
+
 
 # =====================================================
 # START FLOW
@@ -47,10 +46,7 @@ def start_worker_flow(chat_id):
 
         clear_state(chat_id)
 
-        set_state(
-            chat_id,
-            UserState.WORKER_SELECTING_SERVICES.value
-        )
+        set_state(chat_id, UserState.WORKER_SELECTING_SERVICES.value)
 
         bot.send_message(
             chat_id,
@@ -64,6 +60,7 @@ def start_worker_flow(chat_id):
         logger.error(f"[START FLOW ERROR] {chat_id}: {e}")
         logger.error(traceback.format_exc())
         bot.send_message(chat_id, f"{Icons.ERROR} Error iniciando. Usá /start")
+
 
 # =====================================================
 # SERVICIOS
@@ -93,7 +90,6 @@ def _build_service_markup(selected_services):
         selected_services = []
 
     markup = types.InlineKeyboardMarkup(row_width=2)
-    buttons = []
 
     for svc_id, svc in SERVICES.items():
 
@@ -102,21 +98,19 @@ def _build_service_markup(selected_services):
 
         text = f"{'✅ ' if is_selected else ''}{name}"
 
-        buttons.append(
+        markup.add(
             types.InlineKeyboardButton(
                 text=text,
                 callback_data=f"svc_toggle:{svc_id}"
             )
         )
 
-    buttons.append(
+    markup.add(
         types.InlineKeyboardButton(
             "Confirmar ✅",
             callback_data="svc_confirm"
         )
     )
-
-    markup.add(*buttons)
 
     return markup
 
@@ -182,10 +176,7 @@ def handle_service_confirm(call):
         except:
             pass
 
-        set_state(
-            chat_id,
-            UserState.WORKER_ENTERING_NAME.value
-        )
+        set_state(chat_id, UserState.WORKER_ENTERING_NAME.value)
 
         bot.send_message(
             chat_id,
@@ -209,7 +200,7 @@ def handle_service_confirm(call):
 def worker_flow_dispatcher(message):
 
     chat_id = message.chat.id
-current_state = get_state(chat_id)
+    current_state = get_state(chat_id)
 
     try:
 
@@ -243,11 +234,9 @@ def _process_name_input(message, chat_id):
         bot.send_message(chat_id, "❌ Nombre muy corto")
         return
 
-    update_data(
-        chat_id,
-        worker_name=text,
-        state=UserState.WORKER_ENTERING_PHONE.value
-    )
+    update_data(chat_id, worker_name=text)
+
+    set_state(chat_id, UserState.WORKER_ENTERING_PHONE.value)
 
     bot.send_message(
         chat_id,
@@ -271,11 +260,9 @@ def _process_phone_input(message, chat_id):
         bot.send_message(chat_id, "❌ Número muy corto")
         return
 
-    update_data(
-        chat_id,
-        worker_phone=phone,
-        state=UserState.WORKER_ENTERING_DNI.value
-    )
+    update_data(chat_id, worker_phone=phone)
+
+    set_state(chat_id, UserState.WORKER_ENTERING_DNI.value)
 
     bot.send_message(
         chat_id,
@@ -303,12 +290,9 @@ def _process_dni_input(message, chat_id):
 
     try:
 
-        _save_worker_to_db(chat_id, dni)
+        _save_worker_to_db(chat_id)
 
-        set_state(
-            chat_id,
-            UserState.WORKER_SHARING_LOCATION.value
-        )
+        set_state(chat_id, UserState.WORKER_SHARING_LOCATION.value)
 
         _request_location(chat_id)
 
@@ -322,14 +306,12 @@ def _process_dni_input(message, chat_id):
 # SAVE WORKER
 # =====================================================
 
-def _save_worker_to_db(chat_id, dni):
+def _save_worker_to_db(chat_id):
 
     name = get_data(chat_id, "worker_name")
     phone = get_data(chat_id, "worker_phone")
+    dni = get_data(chat_id, "worker_dni")
     services = get_data(chat_id, "selected_services") or []
-
-    if not services:
-        raise ValueError("Worker sin servicios")
 
     now = int(time.time())
 
@@ -413,14 +395,13 @@ def handle_location_shared(message):
 
     chat_id = message.chat.id
 
-    if get_data(chat_id, "state") != UserState.WORKER_SHARING_LOCATION.value:
+    if get_state(chat_id) != UserState.WORKER_SHARING_LOCATION.value:
         return
 
     try:
 
         lat = message.location.latitude
         lon = message.location.longitude
-
         now = int(time.time())
 
         db_execute(
