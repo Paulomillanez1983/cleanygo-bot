@@ -7,7 +7,7 @@ import re
 import traceback
 from telebot import types, apihelper
 
-from config import logger, get_bot, db_execute, set_state, get_state, update_data, get_data, clear_state
+from config import logger, get_bot, db_execute, set_state, update_data, get_data, clear_state, get_session
 from models.states import UserState
 from models.services_data import SERVICES
 from utils.icons import Icons
@@ -196,11 +196,11 @@ def handle_service_confirm(call):
 # DISPATCHER
 # =====================================================
 
-@bot.message_handler(func=lambda m: get_state(m.chat.id) in ACTIVE_WORKER_STATES)
+@bot.message_handler(func=lambda m: get_session(m.chat.id).get("state") in ACTIVE_WORKER_STATES)
 def worker_flow_dispatcher(message):
 
     chat_id = message.chat.id
-current_state = get_session(chat_id).get("state")
+    current_state = get_session(chat_id).get("state")
 
     try:
 
@@ -318,14 +318,14 @@ def _save_worker_to_db(chat_id):
     db_execute(
         """
         INSERT OR REPLACE INTO workers
-        (chat_id, name, phone, dni, is_active, created_at, last_seen)
-        VALUES (?,?,?,?,0,?,?)
+        (chat_id, name, phone, dni, is_active, created_at)
+        VALUES (?,?,?,?,0,?)
         """,
-        (str(chat_id), name, phone, dni, now, now)
+        (str(chat_id), name, phone, dni, now)
     )
 
     db_execute(
-        "DELETE FROM worker_services WHERE worker_chat_id = ?",
+        "DELETE FROM worker_services WHERE chat_id = ?",
         (str(chat_id),)
     )
 
@@ -334,7 +334,7 @@ def _save_worker_to_db(chat_id):
         db_execute(
             """
             INSERT INTO worker_services
-            (worker_chat_id, service_id)
+            (chat_id, service_id)
             VALUES (?,?)
             """,
             (str(chat_id), svc)
@@ -395,7 +395,7 @@ def handle_location_shared(message):
 
     chat_id = message.chat.id
 
-    if get_state(chat_id) != UserState.WORKER_SHARING_LOCATION.value:
+    if get_session(chat_id).get("state") != UserState.WORKER_SHARING_LOCATION.value:
         return
 
     try:
@@ -407,7 +407,7 @@ def handle_location_shared(message):
         db_execute(
             """
             UPDATE workers
-            SET lat=?,lon=?,is_active=1,last_seen=?
+            SET lat=?, lon=?, is_active=1, last_seen=?
             WHERE chat_id=?
             """,
             (lat, lon, now, str(chat_id))
