@@ -160,12 +160,11 @@ def webhook():
 
         update_dict = request.get_json()
 
-        # Debug callbacks
         if update_dict.get("callback_query"):
             data = update_dict["callback_query"].get("data", "N/A")
             logger.info(f"[WEBHOOK] Callback: {data}")
 
-        update = Update.de_json(update_dict, bot)
+        update = Update.de_json(update_dict)
 
         bot.process_new_updates([update])
 
@@ -177,7 +176,6 @@ def webhook():
         return jsonify({"error": "Internal error"}), 500
 
     return jsonify({"status": "ok"}), 200
-
 
 # =========================================================
 # CONFIGURAR WEBHOOK
