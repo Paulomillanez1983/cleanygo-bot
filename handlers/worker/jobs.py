@@ -1,114 +1,33 @@
 """
 Handlers para gestión de trabajos/asignaciones para profesionales.
-VERSIÓN FINAL ESTABLE
+VERSIÓN CORREGIDA PARA CLEANYGO
 """
 
 from telebot import types
-from config import logger, get_db_connection, get_bot
-bot = get_bot()
-
-from config import set_state
+from config import logger, get_db_connection, get_bot, set_state
 from models.states import UserState
-
 from utils.icons import Icons
 from utils.telegram_safe import send_safe, edit_safe
-from requests_db import (
+from services.request_service import (
     get_request,
     update_request_status,
-    assign_worker_to_request,
-    reject_request,
-    complete_request
+    assign_worker_to_request_safe
 )
 
 import time
 from threading import Thread
 
+bot = get_bot()
+
 
 # ===================== PRECIOS =====================
 
 SERVICES_PRICES = {
-    "niñera": {"name": "Niñera", "price": 1500},
-    "limpieza": {"name": "Limpieza", "price": 2000},
-    "plomeria": {"name": "Plomería", "price": 2500},
+    "niñera": {"name": "Niñera", "price": 15000},
+    "cuidado": {"name": "Cuidado de personas", "price": 18000},
+    "ac_inst": {"name": "Instalación A/C", "price": 25000},
+    "ac_tech": {"name": "Visita técnica A/C", "price": 20000},
 }
-
-
-# ===================== BUSCAR WORKERS =====================
-
-def find_available_workers(service_id, lat, lon, hora):
-
-    try:
-
-        if lat is None or lon is None:
-            return [], "invalid_location", {}
-
-        with get_db_connection() as conn:
-
-            cursor = conn.cursor()
-
-            cursor.execute(
-                """
-                SELECT w.user_id, w.lat, w.lon
-                FROM workers w
-                JOIN worker_services ws ON w.user_id = ws.user_id
-                WHERE ws.service_id = ?
-                AND w.is_active = 1
-                AND (w.current_request_id IS NULL OR w.current_request_id = 0)
-                """,
-                (service_id,)
-            )
-
-            workers = cursor.fetchall()
-
-        if not workers:
-            return [], "no_workers", {}
-
-        available = []
-
-        for w in workers:
-
-            w_id = w["user_id"]
-            w_lat = w["lat"]
-            w_lon = w["lon"]
-
-            if w_lat is None or w_lon is None:
-                continue
-
-            distance = ((lat - w_lat) ** 2 + (lon - w_lon) ** 2) ** 0.5
-
-            available.append((w_id, distance))
-
-        available.sort(key=lambda x: x[1])
-
-        return available, "ok", {"total": len(available)}
-
-    except Exception as e:
-
-        logger.error(f"[FIND_WORKERS ERROR]: {e}")
-        return [], "error", {}
-
-
-# ===================== ASIGNACIÓN SEGURA =====================
-
-def assign_worker_to_request_safe(request_id, worker_id):
-
-    try:
-
-        worker_id = int(worker_id)
-
-        result = assign_worker_to_request(request_id, worker_id)
-
-        if result:
-            logger.info(f"[ASSIGN_SAFE] request={request_id} worker={worker_id}")
-            return True
-
-        logger.warning(f"[ASSIGN_SAFE FAIL] request={request_id}")
-        return False
-
-    except Exception as e:
-
-        logger.error(f"[ASSIGN_SAFE ERROR]: {e}")
-        return False
 
 
 # ===================== WORKER ACEPTA =====================
@@ -136,7 +55,9 @@ def handle_job_accept(call):
 
         return
 
-    if request["status"] not in ("pending", "searching", "waiting_acceptance"):
+    request_status = request.get("status", "")
+
+    if request_status not in ("pending", "searching", "waiting_acceptance"):
 
         bot.answer_callback_query(call.id, "❌ Este trabajo ya fue tomado")
 
@@ -164,11 +85,11 @@ def handle_job_accept(call):
 
         return
 
-    set_state(worker_id, UserState.JOB_IN_PROGRESS, {
+    set_state(worker_id, UserState.JOB_IN_PROGRESS.value, {
         "request_id": request_id,
         "client_id": request.get("client_id") or request.get("client_chat_id"),
         "service_id": request.get("service_id"),
-        "hora": request.get("request_time") or request.get("hora")
+        "hora": request.get("hora")
     })
 
     bot.answer_callback_query(call.id, "✅ Trabajo asignado")
@@ -192,6 +113,7 @@ def handle_job_accept(call):
 
     service_id = request.get("service_id")
 
+    # Obtener precio del worker para este servicio
     try:
 
         with get_db_connection() as conn:
@@ -199,8 +121,8 @@ def handle_job_accept(call):
             cursor = conn.cursor()
 
             cursor.execute(
-                "SELECT precio FROM worker_services WHERE user_id=? AND service_id=?",
-                (worker_id, service_id)
+                "SELECT precio FROM worker_services WHERE chat_id=? AND service_id=?",
+                (str(worker_id), service_id)
             )
 
             row = cursor.fetchone()
@@ -297,9 +219,7 @@ def handle_client_reject(call):
     client_id = call.message.chat.id
     request_id = int(call.data.split(":")[1])
 
-    from requests_db import cancel_request
-
-    cancel_request(request_id, reason="Cliente rechazó")
+    update_request_status(request_id, "cancelled")
 
     edit_safe(
         bot,
@@ -326,7 +246,8 @@ def handle_job_reject(call):
         f"{Icons.INFO} Trabajo rechazado"
     )
 
-    reject_request(request_id, worker_id)
+    # Liberar el request para que otro worker lo pueda tomar
+    update_request_status(request_id, "searching")
 
 
 # ===================== TRACKING =====================
@@ -362,8 +283,8 @@ def handle_start_job(call):
                     cursor = conn.cursor()
 
                     cursor.execute(
-                        "SELECT lat,lon FROM workers WHERE user_id=?",
-                        (worker_id,)
+                        "SELECT lat, lon FROM workers WHERE chat_id=?",
+                        (str(worker_id),)
                     )
 
                     data = cursor.fetchone()
@@ -385,6 +306,16 @@ def handle_start_job(call):
     active_tracking[worker_id] = {"running": True}
 
     Thread(target=location_loop, daemon=True).start()
+    
+    # Enviar botón para finalizar
+    markup = types.InlineKeyboardMarkup()
+    markup.add(
+        types.InlineKeyboardButton(
+            f"{Icons.CHECK} Finalizar servicio",
+            callback_data=f"finish_job:{request_id}"
+        )
+    )
+    send_safe(bot, worker_id, "Servicio en curso. Cuando termines, hacé clic en finalizar:", reply_markup=markup)
 
 
 # ===================== FINALIZAR =====================
@@ -404,11 +335,12 @@ def handle_finish_job(call):
 
     if worker_id in active_tracking:
         active_tracking[worker_id]["running"] = False
+        del active_tracking[worker_id]
 
-    complete_request(request_id)
+    update_request_status(request_id, "completed")
 
     send_safe(bot, client_id, "Servicio finalizado")
 
     send_safe(bot, worker_id, "Gracias por tu trabajo")
 
-    set_state(worker_id, UserState.SELECTING_ROLE)
+    set_state(worker_id, UserState.SELECTING_ROLE.value)
