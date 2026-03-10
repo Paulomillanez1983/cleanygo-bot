@@ -76,11 +76,10 @@ def cmd_help(message):
 # ==================== MENU PRINCIPAL ====================
 
 @bot.message_handler(
-    func=lambda message: get_data(message.chat.id, "state") == UserState.SELECTING_ROLE.value,
+    func=lambda message: get_session(message.chat.id).get("state") == UserState.SELECTING_ROLE.value,
     content_types=["text"]
 )
 def handle_main_menu(message):
-
     chat_id = message.chat.id
     text = (message.text or "").strip().lower()
 
