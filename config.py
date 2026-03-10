@@ -523,3 +523,4 @@ def broadcast_to_workers(service_id, message_text):
     except Exception as e:
         logger.error(f"[BROADCAST] Error: {e}")
         return 0
+notify_worker = Notifier.notify_worker
