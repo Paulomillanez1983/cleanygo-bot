@@ -82,7 +82,7 @@ def cmd_help(message):
 def handle_main_menu(message):
 
     chat_id = message.chat.id
-    text = message.text.strip().lower()
+       text = (message.text or "").strip().lower()
 
     logger.info(f"[MENU] Texto recibido: {text} | chat_id={chat_id}")
 
