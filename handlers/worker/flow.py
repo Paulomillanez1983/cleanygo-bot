@@ -205,7 +205,7 @@ def handle_service_confirm(call):
 # DISPATCHER
 # =====================================================
 
-@bot.message_handler(func=lambda m: get_data(m.chat.id, "state") in ACTIVE_WORKER_STATES)
+@bot.message_handler(func=lambda m: get_state(m.chat.id) in ACTIVE_WORKER_STATES)
 def worker_flow_dispatcher(message):
 
     chat_id = message.chat.id
