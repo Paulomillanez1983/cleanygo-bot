@@ -1,6 +1,5 @@
 from config import logger
 
-
 def send_safe(bot, chat_id, text, reply_markup=None, parse_mode="HTML"):
     try:
         return bot.send_message(
