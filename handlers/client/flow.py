@@ -4,23 +4,17 @@ Client flow - Solo flujo de mensajes, NO callbacks
 import logging
 from telebot import types
 
-# CAMBIO: usar get_bot
-from config import logger, get_bot
-# CORREGIDO: Importar funciones desde config (NO desde database)
-from config import (
-    set_state, update_data, get_data, clear_state
-)
-from models.states import UserState
-from models.services_data import SERVICES
-from utils.icons import Icons
+from config import logger, get_bot, set_state, update_data, get_data, clear_state
+from models.states import UserState  # Directo
+from models.services_data import SERVICES  # Directo
+from utils.icons import Icons  # Directo
 from utils.keyboards import (
     get_time_selector,
     get_location_keyboard,
     get_confirmation_keyboard
-)
+)  # Directo
 from handlers.common import send_safe, edit_safe, delete_safe, remove_keyboard
 
-# NUEVO: obtener bot
 bot = get_bot()
 
 logger = logging.getLogger(__name__)
@@ -186,4 +180,3 @@ Ubicación: {lat:.4f}, {lon:.4f}
 ¿Todo correcto?
 """
     send_safe(chat_id, text, get_confirmation_keyboard())
-    # 👆 Este teclado tiene callback_data="confirm_yes" que maneja client/callbacks.py
