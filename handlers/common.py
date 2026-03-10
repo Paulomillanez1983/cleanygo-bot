@@ -1,18 +1,16 @@
 """
 Common handlers - Start, cancel, help, menú principal
 """
-import asyncio  # <-- Agregado para compatibilidad
+import asyncio
 import logging
 from telebot import types
 
-# CORREGIDO: Importar funciones desde config y UserState desde models.states
+# CORREGIDO: Importar directamente desde módulos, no desde models/__init__
 from config import logger, get_bot, notify_worker, set_state, update_data, get_data, clear_state
-from models.states import UserState
-from models.services_data import SERVICES
-from utils.icons import Icons
-from utils.keyboards import get_role_keyboard
+from models.states import UserState  # Importar directamente
+from utils.icons import Icons  # Importar directamente
+from utils.keyboards import get_role_keyboard  # Importar directamente
 
-# NUEVO: obtener instancia del bot
 bot = get_bot()
 
 logger = logging.getLogger(__name__)
