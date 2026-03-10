@@ -8,10 +8,10 @@ import json
 import traceback
 from telebot import types, apihelper
 
-from config import logger, get_bot, db_execute
-from models.user_state import set_state, update_data, get_data, clear_state, UserState
-from models.services_data import SERVICES
-from utils.icons import Icons
+from config import logger, get_bot, db_execute, set_state, update_data, get_data, clear_state
+from models.states import UserState  # Directo
+from models.services_data import SERVICES  # Directo
+from utils.icons import Icons  # Directo
 from handlers.common import send_safe
 
 bot = get_bot()
@@ -205,9 +205,9 @@ def handle_service_confirm(call):
         except:
             pass
 
-        update_data(
+        set_state(
             chat_id,
-            state=UserState.WORKER_ENTERING_NAME.value
+            UserState.WORKER_ENTERING_NAME.value
         )
 
         bot.send_message(
@@ -328,9 +328,9 @@ def _process_dni_input(message, chat_id):
 
         _save_worker_to_db(chat_id, dni)
 
-        update_data(
+        set_state(
             chat_id,
-            state=UserState.WORKER_SHARING_LOCATION.value
+            UserState.WORKER_SHARING_LOCATION.value
         )
 
         _request_location(chat_id)
@@ -359,7 +359,7 @@ def _save_worker_to_db(chat_id, dni):
     db_execute(
         """
         INSERT OR REPLACE INTO workers
-        (chat_id,name,phone,dni,is_active,created_at,last_seen)
+        (chat_id, name, phone, dni, is_active, created_at, last_seen)
         VALUES (?,?,?,?,0,?,?)
         """,
         (str(chat_id), name, phone, dni, now, now)
@@ -375,7 +375,7 @@ def _save_worker_to_db(chat_id, dni):
         db_execute(
             """
             INSERT INTO worker_services
-            (worker_chat_id,service_id)
+            (worker_chat_id, service_id)
             VALUES (?,?)
             """,
             (str(chat_id), svc)
