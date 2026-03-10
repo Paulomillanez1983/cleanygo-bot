@@ -1,9 +1,9 @@
 from telebot import types
 from utils.icons import Icons
-
+from models.services_data import SERVICES
 
 def get_role_keyboard():
-    """Teclado de selección de rol con descripciones"""
+    """Teclado de selección de rol"""
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
     markup.add(
         types.KeyboardButton(f"{Icons.BELL} Necesito un servicio"),
@@ -13,7 +13,7 @@ def get_role_keyboard():
     return markup
 
 def get_cancel_keyboard(text="Cancelar"):
-    """Teclado de cancelación siempre disponible"""
+    """Teclado de cancelación"""
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
     markup.add(types.KeyboardButton(f"{Icons.ERROR} {text}"))
     return markup
@@ -25,7 +25,7 @@ def get_location_keyboard(text="📍 Enviar mi ubicación"):
     return markup
 
 def get_service_selector(selected_services=None):
-    """Selector de servicios con toggles visuales"""
+    """Selector de servicios con toggles"""
     if selected_services is None:
         selected_services = []
     
@@ -47,7 +47,7 @@ def get_service_selector(selected_services=None):
     return markup
 
 def get_time_selector():
-    """Selector de hora TODO EN UN SOLO MENÚ"""
+    """Selector de hora rápida"""
     markup = types.InlineKeyboardMarkup(row_width=4)
     
     popular_hours = [8, 9, 10, 14, 15, 16, 17, 18]
@@ -64,42 +64,6 @@ def get_time_selector():
     
     return markup
 
-def get_custom_time_selector(step="hour", value=None):
-    """Selector de hora personalizado paso a paso"""
-    markup = types.InlineKeyboardMarkup(row_width=4)
-    
-    if step == "hour":
-        buttons = []
-        for h in range(0, 24, 2):
-            btn_text = f"{h:02d}:00"
-            buttons.append(types.InlineKeyboardButton(
-                btn_text, callback_data=f"time_h:{h}"
-            ))
-        markup.add(*buttons[:6])
-        markup.add(*buttons[6:12])
-        markup.add(*buttons[12:18])
-        markup.add(*buttons[18:])
-        
-    elif step == "minute":
-        markup.add(
-            types.InlineKeyboardButton("00", callback_data=f"time_m:{value}:00"),
-            types.InlineKeyboardButton("15", callback_data=f"time_m:{value}:15"),
-            types.InlineKeyboardButton("30", callback_data=f"time_m:{value}:30"),
-            types.InlineKeyboardButton("45", callback_data=f"time_m:{value}:45")
-        )
-        markup.add(types.InlineKeyboardButton(f"{Icons.BACK} Cambiar hora", callback_data="time_back_hour"))
-        
-    elif step == "ampm":
-        hour, minute = value.split(":")
-        markup.add(
-            types.InlineKeyboardButton(f"🌅 AM ({hour}:{minute} AM)", callback_data=f"time_final:{value}:AM"),
-            types.InlineKeyboardButton(f"🌙 PM ({hour}:{minute} PM)", callback_data=f"time_final:{value}:PM")
-        )
-        markup.add(types.InlineKeyboardButton(f"{Icons.BACK} Cambiar minutos", callback_data=f"time_back_min:{hour}"))
-    
-    markup.add(types.InlineKeyboardButton(f"{Icons.ERROR} Cancelar", callback_data="time_cancel"))
-    return markup
-
 def get_confirmation_keyboard():
     markup = types.InlineKeyboardMarkup(row_width=2)
     markup.add(
@@ -108,16 +72,12 @@ def get_confirmation_keyboard():
     )
     return markup
 
-def get_job_response_keyboard(request_id: int):
-    """Alias para compatibilidad - usar get_worker_request_keyboard"""
-    return get_worker_request_keyboard(request_id)
-
 def get_worker_request_keyboard(request_id: int):
-    """Teclado para que worker acepte/rechace una solicitud"""
+    """Teclado para que worker acepte/rechace solicitud"""
     markup = types.InlineKeyboardMarkup(row_width=2)
     markup.add(
-        types.InlineKeyboardButton(f"{Icons.SUCCESS} Aceptar", callback_data=f"accept_request:{request_id}"),
-        types.InlineKeyboardButton(f"{Icons.ERROR} Rechazar", callback_data=f"reject_request:{request_id}"),
+        types.InlineKeyboardButton(f"{Icons.SUCCESS} Aceptar", callback_data=f"job_accept:{request_id}"),
+        types.InlineKeyboardButton(f"{Icons.ERROR} Rechazar", callback_data=f"job_reject:{request_id}"),
         types.InlineKeyboardButton(f"{Icons.INFO} Ver detalles", callback_data=f"view_request:{request_id}")
     )
     return markup
