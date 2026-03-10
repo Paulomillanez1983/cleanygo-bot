@@ -49,11 +49,7 @@ def start_worker_flow(chat_id):
 
         set_state(
             chat_id,
-            UserState.WORKER_SELECTING_SERVICES.value,
-            {
-                "selected_services": [],
-                "flow_started_at": int(time.time())
-            }
+            UserState.WORKER_SELECTING_SERVICES.value
         )
 
         bot.send_message(
@@ -68,9 +64,6 @@ def start_worker_flow(chat_id):
         logger.error(f"[START FLOW ERROR] {chat_id}: {e}")
         logger.error(traceback.format_exc())
         bot.send_message(chat_id, f"{Icons.ERROR} Error iniciando. Usá /start")
-
-
-
 
 # =====================================================
 # SERVICIOS
