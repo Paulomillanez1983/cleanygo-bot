@@ -158,6 +158,8 @@ def init_db():
             
             _create_tables(cursor)
             _create_indexes(cursor)
+            _run_migrations(cursor)
+
             
             conn.commit()
             conn.close()
