@@ -6,24 +6,105 @@ import time
 import traceback
 from telebot import types, apihelper
 
-# CAMBIO: usar get_bot
-from config import logger, get_bot
-# CORREGIDO: Importar funciones desde config y UserState desde models.states
-from config import set_state, update_data, get_data, clear_state
-from models.states import UserState
-from models.services_data import SERVICES
-from utils.icons import Icons
-from utils.keyboards import get_alternative_times_keyboard, get_role_keyboard
-from services.worker_service import find_available_workers
-from services.request_service import create_request, update_request_status, get_request
-from config import db_execute
-
+from config import logger, get_bot, set_state, update_data, get_data, clear_state, db_execute
+from models.states import UserState  # Directo
+from models.services_data import SERVICES  # Directo
+from utils.icons import Icons  # Directo
+from utils.keyboards import get_alternative_times_keyboard, get_role_keyboard  # Directo
+from services.worker_service import find_available_workers  # Directo
+from services.request_service import create_request, update_request_status, get_request  # Directo
 from handlers.common import send_safe, edit_safe, remove_keyboard
 
-# NUEVO: obtener bot
 bot = get_bot()
 
-from handlers.client.search import generate_no_availability_message, notify_worker
+
+def generate_no_availability_message(status: str, service_id: str, hora: str, extra=None) -> str:
+    """Genera mensaje cuando no hay disponibilidad"""
+    from models.services_data import SERVICES
+    from utils.icons import Icons
+    
+    svc_name = SERVICES.get(service_id, {}).get('name', 'Servicio')
+    svc_icon = SERVICES.get(service_id, {}).get('icon', '🔧')
+
+    if status == "no_workers_online":
+        return f"""
+{Icons.WARNING} <b>No hay profesionales conectados</b>
+
+{svc_icon} No hay {svc_name}s online en este momento.
+
+{Icons.INFO} <b>¿Qué podés hacer?</b>
+• Intentá en otro horario
+• Dejá tu solicitud programada
+"""
+    elif status == "workers_far":
+        return f"""
+{Icons.WARNING} <b>No hay {svc_name}s cercanos</b>
+
+{svc_icon} Hay profesionales conectados pero están fuera de tu zona.
+
+Intentá nuevamente más tarde.
+"""
+    elif status == "workers_busy":
+        busy_count = len(extra) if extra else 0
+        return f"""
+{Icons.WARNING} <b>Todos están ocupados</b>
+
+{svc_icon} Encontramos <b>{busy_count}</b> {svc_name}s cerca tuyo
+pero ya tienen trabajo a las <b>{hora}</b>.
+
+Probá con otro horario.
+"""
+    
+    return f"""
+{Icons.WARNING} <b>No encontramos disponibilidad</b>
+
+Intentá con otro horario.
+"""
+
+
+def notify_worker(worker, request_id, service_id, hora, lat, lon):
+    """Notifica a un worker sobre un nuevo trabajo"""
+    from config import get_bot
+    from utils.icons import Icons
+    from models.services_data import SERVICES
+    
+    bot = get_bot()
+    
+    worker_id = worker[0] if isinstance(worker, (list, tuple)) else worker.get('chat_id')
+    nombre = worker[1] if isinstance(worker, (list, tuple)) else worker.get('name')
+    
+    service_info = SERVICES.get(service_id, {"name": service_id.capitalize(), "icon": "🔧"})
+    price = SERVICES.get(service_id, {}).get('base_price', 0)
+    
+    maps_url = f"https://www.google.com/maps?q={lat},{lon}"
+
+    text = f"""
+{Icons.BELL} <b>¡Nuevo trabajo disponible!</b>
+
+Servicio: {service_info['name']}
+{Icons.TIME} <b>Hora:</b> {hora}
+{Icons.MONEY} <b>Precio base:</b> ${price}
+"""
+
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        types.InlineKeyboardButton(
+            f"{Icons.SUCCESS} Aceptar",
+            callback_data=f"job_accept:{request_id}"
+        ),
+        types.InlineKeyboardButton(
+            f"{Icons.ERROR} Rechazar",
+            callback_data=f"job_reject:{request_id}"
+        )
+    )
+    markup.add(
+        types.InlineKeyboardButton(
+            f"{Icons.MAP} Ver en mapa",
+            url=maps_url
+        )
+    )
+
+    send_safe(worker_id, text, markup)
 
 
 # =========================================================
@@ -128,9 +209,9 @@ def handle_confirm_request(call):
         try:
             notify_worker(worker, request_id, service_id, hora_completa, lat, lon)
             notified += 1
-            logger.info(f"[CONFIRM] Notificado trabajador {worker[0]} para request {request_id}")
+            logger.info(f"[CONFIRM] Notificado trabajador {worker[0] if isinstance(worker, (list, tuple)) else worker.get('chat_id')} para request {request_id}")
         except Exception as e:
-            logger.error(f"[CONFIRM] Error notificando a {worker[0]}: {e}")
+            logger.error(f"[CONFIRM] Error notificando: {e}")
             notification_errors.append(str(e))
 
     # Actualizar estado de la solicitud
@@ -139,7 +220,7 @@ def handle_confirm_request(call):
     # Guardar estado del usuario
     set_state(
         chat_id,
-        UserState.CLIENT_WAITING_ACCEPTANCE,
+        UserState.CLIENT_WAITING_ACCEPTANCE.value,
         {"request_id": request_id, "service_id": service_id, "hora": hora_completa}
     )
 
@@ -190,13 +271,14 @@ def handle_cancel_request(call):
         bot.answer_callback_query(call.id, "❌ Solicitud no encontrada", show_alert=True)
         return
     
-    # request = (id, client_id, service_id, fecha, hora, lat, lon, status, ...)
-    if request[1] != chat_id:
-        logger.warning(f"[CANCEL] Usuario {chat_id} intentó cancelar solicitud {request_id} de {request[1]}")
+    # Verificar ownership
+    request_client_id = request.get('client_id') or request.get('client_chat_id')
+    if str(request_client_id) != str(chat_id):
+        logger.warning(f"[CANCEL] Usuario {chat_id} intentó cancelar solicitud {request_id} de {request_client_id}")
         bot.answer_callback_query(call.id, "❌ No tenés permiso para cancelar esta solicitud", show_alert=True)
         return
     
-    current_status = request[7] if len(request) > 7 else 'unknown'
+    current_status = request.get('status', 'unknown')
     
     # Solo cancelar si está en estado cancelable
     if current_status in ['completed', 'cancelled', 'rejected']:
@@ -239,7 +321,7 @@ Tu solicitud #{request_id} ha sido cancelada correctamente.
     
     # Limpiar estado del usuario
     clear_state(chat_id)
-    set_state(chat_id, UserState.SELECTING_ROLE)
+    set_state(chat_id, UserState.SELECTING_ROLE.value)
 
 
 # =========================================================
@@ -266,15 +348,14 @@ def handle_retry_search(call):
         return
 
     # Extraer datos de la solicitud existente
-    try:
-        _, client_id, service_id, _, hora, lat, lon, status, *_ = request
-    except ValueError as e:
-        logger.error(f"[RETRY] Error desempaquetando request {request_id}: {e}")
-        bot.answer_callback_query(call.id, "❌ Error en datos de solicitud", show_alert=True)
-        return
+    client_id = request.get('client_id') or request.get('client_chat_id')
+    service_id = request.get('service_id')
+    hora = request.get('hora')
+    lat = request.get('lat')
+    lon = request.get('lon')
 
     # Verificar que el usuario sea el dueño
-    if client_id != chat_id:
+    if str(client_id) != str(chat_id):
         logger.warning(f"[RETRY] Usuario {chat_id} intentó retry de solicitud {request_id} de {client_id}")
         bot.answer_callback_query(call.id, "❌ No autorizado", show_alert=True)
         return
@@ -288,7 +369,7 @@ def handle_retry_search(call):
     bot.answer_callback_query(call.id, "🔄 Reintentando búsqueda...")
 
     # Parsear hora
-    hora_parts = hora.split()
+    hora_parts = hora.split() if hora else ["12:00", "PM"]
     time_str = hora_parts[0] if hora_parts else "12:00"
     period = hora_parts[1] if len(hora_parts) > 1 else "PM"
 
@@ -332,6 +413,7 @@ def handle_alternative_times(call):
         return
 
     # Verificar que el servicio existe
+    from models.services_data import SERVICES
     service = SERVICES.get(service_id)
     if not service:
         logger.error(f"[ALT_TIMES] Servicio {service_id} no encontrado")
@@ -431,7 +513,7 @@ Conectamos personas que necesitan servicios con profesionales confiables cerca d
         logger.error(f"[BACK_START] Error editando mensaje: {e}")
         send_safe(chat_id, welcome_text, get_role_keyboard())
 
-    set_state(chat_id, UserState.SELECTING_ROLE)
+    set_state(chat_id, UserState.SELECTING_ROLE.value)
     logger.info(f"[BACK_START] Usuario {chat_id} volvió al inicio")
 
 
