@@ -1,28 +1,65 @@
 """
 Common handlers - Start, cancel, help, menú principal
 """
-import asyncio
+
 import logging
 from telebot import types
 
-# CORREGIDO: Importar directamente desde módulos, no desde models/__init__
-from config import logger, get_bot, notify_worker, set_state, update_data, get_data, clear_state
-from models.states import UserState  # Importar directamente
-from utils.icons import Icons  # Importar directamente
-from utils.keyboards import get_role_keyboard  # Importar directamente
+from config import (
+    logger,
+    get_bot,
+    set_state,
+    get_state,
+    clear_state
+)
+
+from models.states import UserState
+from utils.icons import Icons
+from utils.keyboards import get_role_keyboard
+
 
 bot = get_bot()
 
 logger = logging.getLogger(__name__)
 
 
-# ==================== HANDLERS COMUNES ====================
+# =========================================================
+# SAFE UTILS
+# =========================================================
+
+def send_safe(chat_id, text, reply_markup=None, parse_mode="HTML"):
+    try:
+        return bot.send_message(
+            chat_id,
+            text,
+            reply_markup=reply_markup,
+            parse_mode=parse_mode
+        )
+    except Exception as e:
+        logger.error(f"[SEND ERROR] {e} | chat_id={chat_id}")
+        return None
+
+
+def remove_keyboard(chat_id, text="Procesando..."):
+    try:
+        bot.send_message(
+            chat_id,
+            text,
+            reply_markup=types.ReplyKeyboardRemove()
+        )
+    except Exception as e:
+        logger.error(f"[REMOVE_KB ERROR] {e}")
+
+
+# =========================================================
+# /START
+# =========================================================
 
 @bot.message_handler(commands=["start"])
 def cmd_start(message):
-    """Handler de inicio"""
-    chat_id = str(message.chat.id)
-    
+
+    chat_id = message.chat.id
+
     clear_state(chat_id)
 
     welcome_text = f"""
@@ -33,17 +70,26 @@ Conectamos personas que necesitan servicios con profesionales confiables cerca d
 <b>¿Qué necesitás hacer?</b>
 """
 
-    send_safe(chat_id, welcome_text, get_role_keyboard())
+    send_safe(
+        chat_id,
+        welcome_text,
+        get_role_keyboard()
+    )
+
     set_state(chat_id, UserState.SELECTING_ROLE.value)
 
     logger.info(f"[START] Usuario inició bot | chat_id={chat_id}")
 
 
+# =========================================================
+# /CANCEL
+# =========================================================
+
 @bot.message_handler(commands=["cancel"])
 def cmd_cancel(message):
-    """Cancela cualquier flujo activo"""
-    chat_id = str(message.chat.id)
-    
+
+    chat_id = message.chat.id
+
     clear_state(chat_id)
 
     send_safe(
@@ -54,9 +100,15 @@ def cmd_cancel(message):
     logger.info(f"[CANCEL] Flujo cancelado | chat_id={chat_id}")
 
 
+# =========================================================
+# /HELP
+# =========================================================
+
 @bot.message_handler(commands=["help", "ayuda"])
 def cmd_help(message):
-    """Muestra ayuda"""
+
+    chat_id = message.chat.id
+
     text = f"""
 {Icons.INFO} <b>Ayuda de CleanyGo</b>
 
@@ -73,91 +125,59 @@ def cmd_help(message):
 @soporte_cleanygo
 """
 
-    send_safe(message.chat.id, text)
+    send_safe(chat_id, text)
 
 
-# ==================== MENU PRINCIPAL ====================
+# =========================================================
+# MENU PRINCIPAL
+# =========================================================
 
 @bot.message_handler(
-    func=lambda message: get_data(message.chat.id, "state") == UserState.SELECTING_ROLE.value,
+    func=lambda message: get_state(message.chat.id) == UserState.SELECTING_ROLE.value,
     content_types=["text"]
 )
 def handle_main_menu(message):
-    """
-    Handler del menú principal.
-    Solo se activa cuando el estado es SELECTING_ROLE.
-    """
+
     chat_id = message.chat.id
     text = message.text.strip().lower()
 
     logger.info(f"[MENU] Texto recibido: {text} | chat_id={chat_id}")
 
+    # ---------------- CLIENTE ----------------
+
     if "necesito" in text or "servicio" in text:
+
+        remove_keyboard(chat_id)
+
         from handlers.client.flow import start_client_flow
+
         start_client_flow(chat_id)
+
         return
+
+    # ---------------- TRABAJADOR ----------------
 
     if "trabajar" in text:
+
+        remove_keyboard(chat_id)
+
         from handlers.worker.flow import start_worker_flow
+
         start_worker_flow(chat_id)
+
         return
 
+    # ---------------- AYUDA ----------------
+
     if "ayuda" in text:
+
         cmd_help(message)
+
         return
+
+    # ---------------- DEFAULT ----------------
 
     send_safe(
         chat_id,
         f"{Icons.INFO} No entendí esa opción. Usá el menú o escribí /start."
     )
-
-
-# ==================== SAFE UTILS ====================
-
-def send_safe(chat_id, text, reply_markup=None, parse_mode="HTML"):
-    """Envía mensaje de forma segura"""
-    try:
-        return bot.send_message(
-            chat_id,
-            text,
-            reply_markup=reply_markup,
-            parse_mode=parse_mode
-        )
-    except Exception as e:
-        logger.error(f"[SEND ERROR] {e} | chat_id={chat_id}")
-        return None
-
-
-def edit_safe(chat_id, message_id, text, reply_markup=None):
-    """Edita mensaje de forma segura"""
-    try:
-        return bot.edit_message_text(
-            text,
-            chat_id,
-            message_id,
-            reply_markup=reply_markup,
-            parse_mode="HTML"
-        )
-    except Exception as e:
-        logger.error(f"[EDIT ERROR] {e} | message_id={message_id}")
-        return None
-
-
-def delete_safe(chat_id, message_id):
-    """Elimina mensaje de forma segura"""
-    try:
-        bot.delete_message(chat_id, message_id)
-    except Exception as e:
-        logger.error(f"[DELETE ERROR] {e} | message_id={message_id}")
-
-
-def remove_keyboard(chat_id, text="Procesando..."):
-    """Remueve teclado de forma segura"""
-    try:
-        bot.send_message(
-            chat_id,
-            text,
-            reply_markup=types.ReplyKeyboardRemove()
-        )
-    except Exception as e:
-        logger.error(f"[REMOVE_KB ERROR] {e}")
