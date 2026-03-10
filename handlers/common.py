@@ -3,7 +3,7 @@
 import logging
 from telebot import types
 
-from config import logger, get_bot, set_state, update_data, get_data, clear_state
+from config import logger, get_bot, set_state, update_data, get_data, clear_state, get_session
 from models.states import UserState
 from utils.icons import Icons
 from utils.keyboards import get_role_keyboard
