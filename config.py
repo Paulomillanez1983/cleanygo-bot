@@ -488,39 +488,70 @@ def ensure_worker_exists(chat_id):
 # ==================== NOTIFICATIONS ====================
 
 class Notifier:
+
     @staticmethod
     def notify_worker(worker_chat_id, message_text, parse_mode="HTML"):
         """Envía notificación a un worker específico"""
+
         if not _bot_instance:
+            logger.warning("[NOTIFY] Bot no inicializado")
             return False
-        
+
         try:
-            _bot_instance.send_message(worker_chat_id, message_text, parse_mode=parse_mode)
+            _bot_instance.send_message(
+                chat_id=str(worker_chat_id),
+                text=message_text,
+                parse_mode=parse_mode
+            )
             return True
+
         except Exception as e:
             logger.error(f"[NOTIFY] Error enviando a {worker_chat_id}: {e}")
             return False
 
+
+# Alias para compatibilidad con imports existentes
 notify_worker = Notifier.notify_worker
 
+
 def broadcast_to_workers(service_id, message_text):
-    """Notifica a todos los workers de un servicio"""
+    """
+    Notifica a todos los workers que ofrecen un servicio.
+    Incluye rate limit para evitar bloqueos de Telegram.
+    """
+
+    if not _bot_instance:
+        logger.warning("[BROADCAST] Bot no inicializado")
+        return 0
+
     try:
+
         workers = db_execute(
             "SELECT DISTINCT chat_id FROM worker_services WHERE service_id = ?",
             (service_id,),
             fetch_one=False
         )
-        
+
+        workers = workers or []
+
         sent = 0
+
         for worker in workers:
-            if Notifier.notify_worker(worker["chat_id"], message_text):
+
+            worker_id = worker.get("chat_id")
+
+            if worker_id and Notifier.notify_worker(worker_id, message_text):
                 sent += 1
-        
+
+            # Rate limit para evitar flood
+            time.sleep(0.05)
+
         logger.info(f"[BROADCAST] Enviado a {sent}/{len(workers)} workers")
+
         return sent
-        
+
     except Exception as e:
+
         logger.error(f"[BROADCAST] Error: {e}")
+
         return 0
-notify_worker = Notifier.notify_worker
