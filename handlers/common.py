@@ -9,8 +9,8 @@ from config import (
     logger,
     get_bot,
     set_state,
-    get_state,
-    clear_state
+    clear_state,
+    get_data
 )
 
 from models.states import UserState
@@ -133,7 +133,7 @@ def cmd_help(message):
 # =========================================================
 
 @bot.message_handler(
-    func=lambda message: get_state(message.chat.id) == UserState.SELECTING_ROLE.value,
+    func=lambda message: get_data(message.chat.id, "state") == UserState.SELECTING_ROLE.value,
     content_types=["text"]
 )
 def handle_main_menu(message):
