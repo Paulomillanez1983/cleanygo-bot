@@ -209,7 +209,7 @@ def handle_service_confirm(call):
 def worker_flow_dispatcher(message):
 
     chat_id = message.chat.id
-    current_state = get_data(chat_id, "state")
+current_state = get_state(chat_id)
 
     try:
 
