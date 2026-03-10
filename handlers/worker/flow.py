@@ -71,21 +71,6 @@ def start_worker_flow(chat_id):
         bot.send_message(chat_id, f"{Icons.ERROR} Error iniciando. Usá /start")
 
 
-# =====================================================
-# BOTÓN TRABAJAR
-# =====================================================
-
-@bot.message_handler(
-    func=lambda m: (
-        m.text
-        and "quiero trabajar" in m.text.lower()
-        and get_data(m.chat.id, "state") == UserState.SELECTING_ROLE.value
-    )
-)
-def handle_worker_start(message):
-    chat_id = message.chat.id
-    logger.info(f"[HANDLER] Botón trabajar | chat_id={chat_id}")
-    start_worker_flow(chat_id)
 
 
 # =====================================================
