@@ -1,138 +1,111 @@
-# services/worker_service.py
-
+"""
+Servicios para gestión de trabajadores (workers)
+"""
 import math
 from config import get_db_connection, logger
 
 
-# ==================================
-# HAVERSINE DISTANCE
-# ==================================
-
 def haversine(lat1, lon1, lat2, lon2):
-
-    R = 6371  # radio tierra km
-
-    dlat = math.radians(lat2 - lat1)
-    dlon = math.radians(lon2 - lon1)
-
-    a = (
-        math.sin(dlat / 2) ** 2
-        + math.cos(math.radians(lat1))
-        * math.cos(math.radians(lat2))
-        * math.sin(dlon / 2) ** 2
-    )
-
+    """
+    Calcula distancia en km entre dos coordenadas usando la fórmula de Haversine
+    """
+    R = 6371  # Radio de la Tierra en km
+    
+    lat1_rad = math.radians(lat1)
+    lat2_rad = math.radians(lat2)
+    delta_lat = math.radians(lat2 - lat1)
+    delta_lon = math.radians(lon2 - lon1)
+    
+    a = (math.sin(delta_lat / 2) ** 2 + 
+         math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(delta_lon / 2) ** 2)
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-
+    
     return R * c
 
 
-# ==================================
-# FIND AVAILABLE WORKERS
-# ==================================
-
-def find_available_workers(service_id, lat, lon, hora_completa):
-
+def find_available_workers(service_id, client_lat, client_lon, hora, max_distance_km=10):
+    """
+    Busca trabajadores disponibles para un servicio cercanos a una ubicación
+    
+    Returns: (workers_list, status, extra_info)
+    - workers_list: lista de workers (dicts o tuplas)
+    - status: 'success', 'no_workers_online', 'workers_far', 'workers_busy', 'error'
+    - extra_info: datos adicionales según el status
+    """
     try:
-
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
-        cursor.execute(
-            """
-            SELECT
-                w.chat_id,
-                w.name,
-                w.lat,
-                w.lon,
-                w.rating,
-                w.jobs_done,
-                w.is_active
-            FROM workers w
-            JOIN worker_services ws
-            ON w.chat_id = ws.worker_chat_id
-            WHERE ws.service_id = ?
-            """,
-            (service_id,)
-        )
-
-        rows = cursor.fetchall()
-        conn.close()
-
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Buscar workers activos que ofrezcan el servicio
+            cursor.execute("""
+                SELECT w.chat_id, w.name, w.lat, w.lon, w.rating, ws.precio
+                FROM workers w
+                JOIN worker_services ws ON w.chat_id = ws.chat_id
+                WHERE ws.service_id = ? AND w.is_active = 1
+            """, (service_id,))
+            
+            workers = cursor.fetchall()
+            
+            if not workers:
+                return [], "no_workers_online", None
+            
+            # Calcular distancias y filtrar por proximidad
+            nearby_workers = []
+            busy_workers = []
+            
+            for worker in workers:
+                worker_dict = dict(worker)
+                
+                # Validar coordenadas
+                if worker_dict.get('lat') is None or worker_dict.get('lon') is None:
+                    continue
+                
+                dist = haversine(
+                    client_lat, client_lon, 
+                    worker_dict['lat'], worker_dict['lon']
+                )
+                worker_dict['distance'] = dist
+                worker_dict['distance_text'] = f"{dist:.1f} km"
+                
+                # Verificar si está ocupado a esa hora (simplificado)
+                # En una versión más compleja, verificarías contra la tabla requests
+                cursor.execute("""
+                    SELECT 1 FROM requests 
+                    WHERE worker_id = ? AND hora = ? AND status IN ('assigned', 'in_progress')
+                """, (worker_dict['chat_id'], hora))
+                
+                is_busy = cursor.fetchone() is not None
+                
+                if dist <= max_distance_km:
+                    if is_busy:
+                        busy_workers.append(worker_dict)
+                    else:
+                        nearby_workers.append(worker_dict)
+            
+            if not nearby_workers and not busy_workers:
+                return [], "workers_far", None
+            
+            if not nearby_workers and busy_workers:
+                return busy_workers, "workers_busy", busy_workers
+            
+            # Ordenar por distancia
+            nearby_workers.sort(key=lambda x: x['distance'])
+            
+            # Convertir a formato de tupla para compatibilidad con código existente
+            result_workers = []
+            for w in nearby_workers:
+                result_workers.append((
+                    w['chat_id'],
+                    w['name'],
+                    w['lat'],
+                    w['lon'],
+                    w.get('rating', 0),
+                    w.get('precio', 0),
+                    w['distance']
+                ))
+            
+            return result_workers, "success", None
+            
     except Exception as e:
-
-        logger.error(f"[MATCH ERROR] DB query failed: {e}")
-        return [], "db_error", None
-
-
-    if not rows:
-        return [], "no_workers_registered", None
-
-
-    available_workers = []
-    far_workers = []
-
-
-    for row in rows:
-
-        worker_chat_id = row[0]
-        name = row[1]
-        w_lat = row[2]
-        w_lon = row[3]
-        rating = row[4]
-        jobs_done = row[5]
-        is_active = row[6]
-
-
-        # worker offline
-        if not is_active:
-            continue
-
-
-        # worker sin ubicación
-        if w_lat is None or w_lon is None:
-            continue
-
-
-        try:
-
-            distance = haversine(lat, lon, w_lat, w_lon)
-
-        except Exception as e:
-
-            logger.warning(f"[DISTANCE ERROR] worker={worker_chat_id}")
-            continue
-
-
-        worker = [
-            worker_chat_id,
-            name,
-            w_lat,
-            w_lon,
-            rating,
-            jobs_done,
-            distance
-        ]
-
-
-        if distance <= 10:
-            available_workers.append(worker)
-        else:
-            far_workers.append(worker)
-
-
-    if not available_workers:
-
-        if far_workers:
-            return [], "workers_far", far_workers
-
-        return [], "no_workers_online", None
-
-
-    available_workers.sort(key=lambda x: x[6])
-
-
-    logger.info(f"[MATCH] {len(available_workers)} workers encontrados")
-
-
-    return available_workers, "success", None
+        logger.error(f"[FIND WORKERS ERROR] {e}")
+        return [], "error", str(e)
