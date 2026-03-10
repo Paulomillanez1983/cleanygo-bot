@@ -236,7 +236,21 @@ def _create_indexes(cursor):
     cursor.execute(
         "CREATE INDEX IF NOT EXISTS idx_requests_status ON requests(status)"
     )
+def _run_migrations(cursor):
+    """
+    Migraciones seguras de la base de datos.
+    Agrega columnas si no existen.
+    """
 
+    cursor.execute("PRAGMA table_info(workers)")
+    columns = [row[1] for row in cursor.fetchall()]
+
+    if "last_seen" not in columns:
+        cursor.execute(
+            "ALTER TABLE workers ADD COLUMN last_seen INTEGER DEFAULT 0"
+        )
+        logger.info("✅ Migración aplicada: workers.last_seen")
+        
 # ==================== DB EXECUTE CON RETRY ====================
 
 def db_execute(query, params=(), fetch_one=False, max_retries=3):
