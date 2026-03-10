@@ -14,8 +14,7 @@ from models.user_state import set_state, update_data, get_data, clear_state, Use
 from models.services_data import SERVICES
 from utils.icons import Icons
 from handlers.common import send_safe
-from services.worker_service import db_execute
-
+from config import db_execute
 # NUEVO: obtener bot
 bot = get_bot()
 
