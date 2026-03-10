@@ -22,3 +22,42 @@ class UserState(Enum):
     CLIENT_WAITING_ACCEPTANCE = "client_waiting_acceptance"
 
     JOB_IN_PROGRESS = "job_in_progress"
+
+
+_state_store = {}
+_data_store = {}
+
+
+def set_state(user_id: int, state: str, data: dict | None = None):
+
+    _state_store[user_id] = state
+
+    if data:
+        if user_id not in _data_store:
+            _data_store[user_id] = {}
+
+        _data_store[user_id].update(data)
+
+
+def update_data(user_id: int, **kwargs):
+
+    if user_id not in _data_store:
+        _data_store[user_id] = {}
+
+    _data_store[user_id].update(kwargs)
+
+
+def get_data(user_id: int, key: str = None):
+
+    data = _data_store.get(user_id, {})
+
+    if key:
+        return data.get(key)
+
+    return data
+
+
+def clear_state(user_id: int):
+
+    _state_store.pop(user_id, None)
+    _data_store.pop(user_id, None)
