@@ -84,8 +84,7 @@ def handle_main_menu(message):
     chat_id = message.chat.id
     text = (message.text or "").strip().lower()
 
-    logger.info(f"[MENU] Texto recibido: {text} | chat_id={chat_id}")
-    
+    logger.info(f"[MENU] Texto recibido: {text} | chat_id={chat_id}")    
     if "necesito" in text or "servicio" in text:
         from handlers.client.flow import start_client_flow
         start_client_flow(chat_id)
