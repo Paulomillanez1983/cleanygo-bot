@@ -67,7 +67,7 @@ except Exception as e:
 
 
 # =========================================================
-# CARGAR HANDLERS
+# CARGAR HANDLERS (ORDEN CORREGIDO PARA EVITAR CIRCULARES)
 # =========================================================
 
 def load_handlers():
@@ -77,22 +77,39 @@ def load_handlers():
     """
 
     try:
+        # 0. Importar models primero (sin dependencias circulares)
+        import models.states
+        import models.services_data
+        logger.info("[INIT] Models cargados")
 
-        # 1. Handlers comunes
+        # 1. Utils básicos (sin dependencias de models)
+        import utils.icons
+        import utils.telegram_safe
+        logger.info("[INIT] Utils básicos cargados")
+
+        # 2. Keyboards (depende de models.services_data)
+        import utils.keyboards
+        logger.info("[INIT] Keyboards cargados")
+
+        # 3. Handlers comunes
         import handlers.common
         logger.info("[INIT] Handlers comunes cargados")
 
-        # 2. Flujo cliente
+        # 4. Flujo cliente
         import handlers.client.flow
         logger.info("[INIT] Client flow cargado")
 
-        # 3. Callbacks cliente
+        # 5. Callbacks cliente
         import handlers.client.callbacks
         logger.info("[INIT] Client callbacks cargados")
 
-        # 4. Flujo trabajador
+        # 6. Flujo trabajador
         import handlers.worker.flow
         logger.info("[INIT] Worker flow cargado")
+
+        # 7. Jobs trabajador
+        import handlers.worker.jobs
+        logger.info("[INIT] Worker jobs cargados")
 
         logger.info(f"[DEBUG] Message handlers: {len(bot.message_handlers)}")
         logger.info(f"[DEBUG] Callback handlers: {len(bot.callback_query_handlers)}")
