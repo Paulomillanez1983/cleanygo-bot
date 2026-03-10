@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """
 CleanyGo Bot - Railway Production Entrypoint
-Versión optimizada para Railway + Gunicorn + Webhook
+Optimizado para Railway + Gunicorn + Webhook
+Versión estable anti-loops / anti-updates duplicados
 """
 
 import os
 import time
 import traceback
+import threading
 
 from telebot import TeleBot
 from telebot.types import Update
@@ -34,18 +36,17 @@ logger.info(f"[INIT] Token cargado: {TOKEN[:10]}...")
 bot = TeleBot(
     TOKEN,
     parse_mode="HTML",
-    threaded=True  # IMPORTANTE: permite múltiples updates simultáneos
+    threaded=True
 )
 
 logger.info(f"[INIT] Bot creado: {id(bot)}")
 
 
 # =========================================================
-# INYECTAR BOT EN CONFIG
+# INYECTAR BOT
 # =========================================================
 
 inject_bot(bot)
-
 logger.info("[INIT] Bot inyectado en config")
 
 
@@ -62,52 +63,40 @@ try:
 except Exception as e:
 
     logger.error(f"[DB ERROR] {e}", exc_info=True)
-
     raise
 
 
 # =========================================================
-# CARGAR HANDLERS (ORDEN CORREGIDO PARA EVITAR CIRCULARES)
+# CARGAR HANDLERS
 # =========================================================
 
 def load_handlers():
-    """
-    Carga handlers en orden específico.
-    Los decoradores registran automáticamente al importar.
-    """
 
     try:
-        # 0. Importar models primero (sin dependencias circulares)
+
         import models.states
         import models.services_data
         logger.info("[INIT] Models cargados")
 
-        # 1. Utils básicos (sin dependencias de models)
         import utils.icons
         import utils.telegram_safe
         logger.info("[INIT] Utils básicos cargados")
 
-        # 2. Keyboards (depende de models.services_data)
         import utils.keyboards
         logger.info("[INIT] Keyboards cargados")
 
-        # 3. Handlers comunes
         import handlers.common
         logger.info("[INIT] Handlers comunes cargados")
 
-        # 4. Flujo cliente
         import handlers.client.flow
         logger.info("[INIT] Client flow cargado")
 
-        # 5. Callbacks cliente
         import handlers.client.callbacks
         logger.info("[INIT] Client callbacks cargados")
 
-        # 6. Flujo trabajador
         import handlers.worker.flow
         logger.info("[INIT] Worker flow cargado")
 
-        # 7. Jobs trabajador
         import handlers.worker.jobs
         logger.info("[INIT] Worker jobs cargados")
 
@@ -118,7 +107,6 @@ def load_handlers():
 
         logger.error(f"[ERROR] Cargando handlers: {e}")
         logger.error(traceback.format_exc())
-
         raise
 
 
@@ -132,12 +120,21 @@ load_handlers()
 app = Flask(__name__)
 
 
+# =========================================================
+# CONTROL DE DUPLICADOS
+# =========================================================
+
+last_update_id = None
+lock = threading.Lock()
+
+
+# =========================================================
+# HEALTHCHECK
+# =========================================================
+
 @app.route("/")
 @app.route("/health")
 def health():
-    """
-    Endpoint de health check para Railway
-    """
 
     return jsonify({
         "status": "healthy",
@@ -150,8 +147,14 @@ def health():
     }), 200
 
 
+# =========================================================
+# WEBHOOK
+# =========================================================
+
 @app.route("/webhook", methods=["POST"])
 def webhook():
+
+    global last_update_id
 
     try:
 
@@ -160,13 +163,45 @@ def webhook():
 
         update_dict = request.get_json()
 
+        if "update_id" not in update_dict:
+            return jsonify({"ignored": True}), 200
+
+        update_id = update_dict["update_id"]
+
+        # ---------------------------------
+        # Evitar updates duplicados
+        # ---------------------------------
+
+        with lock:
+
+            if last_update_id == update_id:
+                return jsonify({"duplicate": True}), 200
+
+            last_update_id = update_id
+
+        # ---------------------------------
+        # Logging callbacks
+        # ---------------------------------
+
         if update_dict.get("callback_query"):
+
             data = update_dict["callback_query"].get("data", "N/A")
+
             logger.info(f"[WEBHOOK] Callback: {data}")
+
+        # ---------------------------------
+        # Procesar update en thread
+        # ---------------------------------
 
         update = Update.de_json(update_dict)
 
-        bot.process_new_updates([update])
+        threading.Thread(
+            target=bot.process_new_updates,
+            args=([update],),
+            daemon=True
+        ).start()
+
+        return jsonify({"status": "ok"}), 200
 
     except Exception as e:
 
@@ -175,7 +210,6 @@ def webhook():
 
         return jsonify({"error": "Internal error"}), 500
 
-    return jsonify({"status": "ok"}), 200
 
 # =========================================================
 # CONFIGURAR WEBHOOK
@@ -186,6 +220,7 @@ def setup_webhook():
     domain = os.environ.get("RAILWAY_PUBLIC_DOMAIN")
 
     if not domain:
+
         logger.warning("[WEBHOOK] RAILWAY_PUBLIC_DOMAIN no definido")
         return False
 
@@ -205,7 +240,8 @@ def setup_webhook():
 
             bot.set_webhook(
                 url=webhook_url,
-                drop_pending_updates=True
+                drop_pending_updates=True,
+                allowed_updates=["message", "callback_query"]
             )
 
         else:
@@ -217,12 +253,11 @@ def setup_webhook():
     except Exception as e:
 
         logger.error(f"[WEBHOOK ERROR] {e}")
-
         return False
 
 
 # =========================================================
-# INICIALIZAR WEBHOOK SOLO EN RAILWAY
+# INICIALIZAR WEBHOOK
 # =========================================================
 
 if os.environ.get("RAILWAY_PUBLIC_DOMAIN"):
