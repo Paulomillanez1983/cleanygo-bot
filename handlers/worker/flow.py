@@ -20,7 +20,6 @@ apihelper.SESSION_TIME_TO_LIVE = 10 * 60
 
 
 ACTIVE_WORKER_STATES = [
-    UserState.WORKER_SELECTING_SERVICES.value,
     UserState.WORKER_ENTERING_NAME.value,
     UserState.WORKER_ENTERING_PHONE.value,
     UserState.WORKER_ENTERING_DNI.value,
