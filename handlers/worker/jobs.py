@@ -17,8 +17,7 @@ from services.request_service import (
 import time
 from threading import Thread
 
-bot = get_bot()
-
+bot = None
 
 # ===================== PRECIOS =====================
 
