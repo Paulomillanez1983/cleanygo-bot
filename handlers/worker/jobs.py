@@ -5,7 +5,7 @@ VERSIÓN CON PRECIO PERSONALIZADO Y TRACKING EN TIEMPO REAL
 
 from telebot import types
 from config import logger, get_db_connection, set_state, get_data, clear_state
-from models.states import UserState
+from models.states import UserState, get_state
 from utils.icons import Icons
 from utils.telegram_safe import send_safe, edit_safe
 from services.request_service import (
@@ -106,9 +106,7 @@ Escribí el monto en números (ej: 18000)
 
     # ===================== WORKER INGRESA PRECIO =====================
 
-    @bot.message_handler(func=lambdaSA PRECIO =====================
-
-    @bot.message_handler(func=lambda m: get_worker_state(m.chat.id) == UserState.WORKER_ENTERING_PRICE.value)
+    @bot.message_handler(func=lambda m: get_state(m.chat.id) == UserState.WORKER_ENTERING_PRICE.value)
     def handle_worker_price_input(message):
 
         worker_id = message.chat.id
@@ -443,12 +441,3 @@ Presioná finalizar cuando termines.
 
         clear_state(worker_id)
 
-
-# ===================================================
-# HELPER PARA OBTENER ESTADO
-# ===================================================
-
-def get_worker_state(chat_id):
-    """Obtener estado actual del usuario desde el módulo states"""
-    from models.states import _state_store
-    return _state_store.get(chat_id)
