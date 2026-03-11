@@ -270,7 +270,16 @@ def _run_migrations(cursor):
         )
         logger.info("✅ Migración aplicada: workers.rating")
         
-        
+    # requests.worker_price
+    cursor.execute("PRAGMA table_info(requests)")
+    columns = [row[1] for row in cursor.fetchall()]
+    
+    if "worker_price" not in columns:
+        cursor.execute(
+            "ALTER TABLE requests ADD COLUMN worker_price INTEGER DEFAULT 0"
+        )
+        logger.info("✅ Migración aplicada: requests.worker_price")
+
 # ==================== DB EXECUTE CON RETRY ====================
 
 def db_execute(query, params=(), fetch_one=False, max_retries=3):
