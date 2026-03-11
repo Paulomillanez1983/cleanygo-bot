@@ -248,6 +248,31 @@ def _is_client_waiting_acceptance(message):
     session = get_session(message.chat.id)
     return session.get("state") == UserState.CLIENT_WAITING_ACCEPTANCE.value
 
+
+@bot.message_handler(func=_is_client_waiting_acceptance)
+def handle_client_waiting_message(message):
+
+    chat_id = message.chat.id
+    request_id = get_data(chat_id, "request_id")
+
+    text = f"""
+{Icons.CLOCK} <b>Estás esperando que un profesional acepte tu solicitud...</b>
+
+Por favor, esperá unos momentos. Te notificaremos cuando alguien acepte.
+
+¿Querés cancelar la solicitud?
+"""
+
+    markup = types.InlineKeyboardMarkup()
+    markup.add(
+        types.InlineKeyboardButton(
+            f"{Icons.ERROR} Cancelar solicitud",
+            callback_data=f"client_cancel_request:{request_id}"
+        )
+    )
+
+    send_safe(chat_id, text, markup)
+    
 @bot.message_handler(func=_is_client_waiting_acceptance)
 def handle_client_waiting_message(message):
     """
@@ -276,55 +301,53 @@ Por favor, esperá unos momentos. Te notificaremos cuando alguien acepte.
 
 @bot.callback_query_handler(func=lambda c: c.data == "confirm_yes")
 def handle_client_confirm(call):
-    """Cliente confirma la solicitud"""
-    
+
     chat_id = call.message.chat.id
-    
-    # Obtener datos de la sesión
+
     service_id = get_data(chat_id, "service_id")
     service_name = get_data(chat_id, "service_name")
     time_str = get_data(chat_id, "selected_time")
     lat = get_data(chat_id, "lat")
     lon = get_data(chat_id, "lon")
-    
+
     if not all([service_id, time_str, lat, lon]):
         bot.answer_callback_query(call.id, "❌ Error: datos incompletos", show_alert=True)
         return
-    
-    # Crear la solicitud en la base de datos
-    from services.request_service import create_request
-    
-    try:
-    request_id = create_request(
-        client_id=chat_id,
-        service_id=service_id,
-        hora=time_str,
-        lat=lat,
-        lon=lon
-    )
 
-    if not request_id:
+    from services.request_service import create_request
+
+    try:
+
+        request_id = create_request(
+            client_id=chat_id,
+            service_id=service_id,
+            hora=time_str,
+            lat=lat,
+            lon=lon
+        )
+
+        if not request_id:
+            bot.answer_callback_query(call.id, "❌ Error creando solicitud", show_alert=True)
+            return
+
+        logger.info(f"[REQUEST] Creada solicitud {request_id} para {chat_id}")
+
+    except Exception as e:
+
+        logger.error(f"[REQUEST CREATE ERROR] {e}")
         bot.answer_callback_query(call.id, "❌ Error creando solicitud", show_alert=True)
         return
 
-    logger.info(f"[REQUEST] Creada solicitud {request_id} para {chat_id}")
-
-except Exception as e:
-    logger.error(f"[REQUEST CREATE ERROR] {e}")
-    bot.answer_callback_query(call.id, "❌ Error creando solicitud", show_alert=True)
-    return
-    
-    # Cambiar estado a esperando aceptación
+    # estado esperando trabajador
     set_state(chat_id, UserState.CLIENT_WAITING_ACCEPTANCE.value, {
         "request_id": request_id,
         "service_id": service_id,
         "service_name": service_name,
         "selected_time": time_str
     })
-    
+
     bot.answer_callback_query(call.id, "✅ Solicitud enviada")
-    
-    # Editar mensaje para mostrar que está esperando
+
     text = f"""
 {Icons.SEARCH} <b>¡Solicitud enviada!</b>
 
@@ -335,24 +358,22 @@ except Exception as e:
 ⏱️ Tiempo estimado: 2-3 minutos
 """
 
-request_id = get_data(chat_id, "request_id")
-
-markup = types.InlineKeyboardMarkup()
-markup.add(
-    types.InlineKeyboardButton(
-        f"{Icons.ERROR} Cancelar solicitud",
-        callback_data=f"client_cancel_request:{request_id}"
+    markup = types.InlineKeyboardMarkup()
+    markup.add(
+        types.InlineKeyboardButton(
+            f"{Icons.ERROR} Cancelar solicitud",
+            callback_data=f"client_cancel_request:{request_id}"
+        )
     )
-)
 
-edit_safe(chat_id, call.message.message_id, text, markup)
+    edit_safe(chat_id, call.message.message_id, text, markup)
 
-    # Notificar a trabajadores cercanos (esto llama a tu lógica de matching)
+    # matching workers
     from services.matching_service import notify_nearby_workers
-    notified_count = notify_nearby_workers(request_id, lat, lon, service_id)
-    
-    logger.info(f"[CONFIRM] Solicitud {request_id} creada. Notified={notified_count}")
 
+    notified_count = notify_nearby_workers(request_id, lat, lon, service_id)
+
+    logger.info(f"[CONFIRM] Solicitud {request_id} creada. Notified={notified_count}")
 
 @bot.callback_query_handler(func=lambda c: c.data == "confirm_no")
 def handle_client_cancel_confirmation(call):
@@ -373,38 +394,36 @@ def handle_client_cancel_confirmation(call):
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("client_cancel_request:"))
 def handle_client_cancel_request(call):
-    """Cliente cancela una solicitud en espera"""
-    
+
     chat_id = call.message.chat.id
     request_id = int(call.data.split(":")[1])
-    
+
     from services.request_service import update_request_status, get_request
-    
+
     request = get_request(request_id)
-    
+
     if not request:
         bot.answer_callback_query(call.id, "❌ Solicitud no encontrada")
         return
-    
-    # Solo cancelar si está en estado válido
+
     if request.get("status") not in ("pending", "waiting_acceptance", "searching"):
         bot.answer_callback_query(call.id, "❌ No se puede cancelar esta solicitud", show_alert=True)
         return
-    
+
     update_request_status(request_id, "cancelled_by_client")
-    
+
     bot.answer_callback_query(call.id, "✅ Solicitud cancelada")
-    
+
     edit_safe(
         chat_id,
         call.message.message_id,
         f"{Icons.ERROR} Solicitud cancelada. Usá /start para crear una nueva."
     )
-    
+
     clear_state(chat_id)
-    
-    # Notificar al trabajador si ya había sido asignado
+
     worker_id = request.get("worker_id")
+
     if worker_id:
         send_safe(
             worker_id,
