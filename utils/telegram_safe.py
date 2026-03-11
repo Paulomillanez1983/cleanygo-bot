@@ -4,7 +4,7 @@ from telebot import types
 bot = get_bot()
 
 
-def send_safe(bot, chat_id, text, reply_markup=None, parse_mode="HTML"):
+def send_safe(chat_id, text, reply_markup=None, parse_mode="HTML"):
     try:
         return bot.send_message(
             chat_id,
@@ -17,7 +17,7 @@ def send_safe(bot, chat_id, text, reply_markup=None, parse_mode="HTML"):
         return None
 
 
-def edit_safe(bot, chat_id, message_id, text, reply_markup=None, parse_mode="HTML"):
+def edit_safe(chat_id, message_id, text, reply_markup=None, parse_mode="HTML"):
     try:
         return bot.edit_message_text(
             text=text,
@@ -31,7 +31,7 @@ def edit_safe(bot, chat_id, message_id, text, reply_markup=None, parse_mode="HTM
         return None
 
 
-def delete_safe(bot, chat_id, message_id):
+def delete_safe(chat_id, message_id):
     try:
         return bot.delete_message(chat_id, message_id)
     except Exception as e:
@@ -39,7 +39,7 @@ def delete_safe(bot, chat_id, message_id):
         return None
 
 
-def answer_callback_safe(bot, callback_id, text=None, alert=False):
+def answer_callback_safe(callback_id, text=None, alert=False):
     try:
         return bot.answer_callback_query(
             callback_query_id=callback_id,
@@ -50,10 +50,6 @@ def answer_callback_safe(bot, callback_id, text=None, alert=False):
         logger.error(f"[CALLBACK ERROR] {e}")
         return None
 
-
-# ===============================
-# REMOVE KEYBOARD
-# ===============================
 
 def remove_keyboard(chat_id, text="Procesando..."):
     try:
