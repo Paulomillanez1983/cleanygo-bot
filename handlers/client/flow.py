@@ -223,21 +223,31 @@ Te avisaremos cuando alguien acepte.
 @bot.callback_query_handler(func=lambda c: c.data == "confirm_yes")
 def handle_client_confirm(call):
     chat_id = call.message.chat.id
+
+    # Obtener datos necesarios
     service_id = get_data(chat_id, "service_id")
     service_name = get_data(chat_id, "service_name")
     time_str = get_data(chat_id, "selected_time")
     lat = get_data(chat_id, "lat")
     lon = get_data(chat_id, "lon")
 
+    # Validar datos
     if not all([service_id, service_name, time_str, lat, lon]):
         bot.answer_callback_query(call.id, "❌ Error: datos incompletos", show_alert=True)
         return
 
+    # 🔹 Evitar que el usuario haga doble click: remover teclado inmediatamente
+    remove_keyboard(chat_id, "✅ Confirmado")
+    bot.answer_callback_query(call.id, "✅ Solicitud enviada")  # confirmación inmediata
+
     from services.request_service import create_request
     from services.matching_service import notify_nearby_workers
+    from threading import Thread
 
     try:
-        logger.info(f"[CONFIRM] Antes de create_request")
+        logger.info(f"[CONFIRM] Creando solicitud para chat_id={chat_id}")
+
+        # Crear solicitud en DB
         request_id = create_request(
             client_id=chat_id,
             service_id=service_id,
@@ -248,16 +258,16 @@ def handle_client_confirm(call):
         logger.info(f"[CONFIRM] request_id={request_id} creado")
 
         if not request_id:
-            bot.answer_callback_query(call.id, "❌ Error creando solicitud", show_alert=True)
+            bot.send_message(chat_id, "❌ Error creando solicitud. Intentá nuevamente.")
             return
 
     except Exception as e:
         logger.error(f"[REQUEST CREATE ERROR] {e}")
-        bot.answer_callback_query(call.id, "❌ Error creando solicitud", show_alert=True)
+        bot.send_message(chat_id, "❌ Error creando solicitud. Contactá soporte.")
         return
 
+    # Cambiar estado a esperando aceptación
     set_state(chat_id, UserState.CLIENT_WAITING_ACCEPTANCE.value, {"request_id": request_id})
-    bot.answer_callback_query(call.id, "✅ Solicitud enviada")
 
     # Mensaje de confirmación
     text = f"""
@@ -274,10 +284,10 @@ Estamos buscando profesionales disponibles para las {time_str} PM.
             callback_data=f"client_cancel_request:{request_id}"
         )
     )
+
     edit_safe(chat_id, call.message.message_id, text, markup)
 
-    # 🔹 Notificar prestadores de manera asíncrona
-    from threading import Thread
+    # 🔹 Notificar prestadores de manera asíncrona sin bloquear al usuario
     Thread(
         target=notify_nearby_workers,
         kwargs={
@@ -289,8 +299,6 @@ Estamos buscando profesionales disponibles para las {time_str} PM.
         },
         daemon=True
     ).start()
-
-
 # ==================== CANCELAR SOLICITUD ====================
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("client_cancel_request:"))
