@@ -195,7 +195,7 @@ def webhook():
         # Procesar update en thread
         # ---------------------------------
 
-        update = Update.de_json(update_dict)
+        update = Update.de_json(update_dict, bot)
 
         threading.Thread(
             target=bot.process_new_updates,
