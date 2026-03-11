@@ -137,7 +137,7 @@ def proceed_to_location(chat_id: int, message_id: int):
     service_id = get_data(chat_id, "service_id")
     time_str = get_data(chat_id, "selected_time")
 
-    if not service_id:
+    if not service_id or not time_str:
         send_safe(chat_id, f"{Icons.ERROR} Error: sesión expirada. Usá /start.")
         return
 
@@ -236,9 +236,9 @@ def handle_client_confirm(call):
         bot.answer_callback_query(call.id, "❌ Error: datos incompletos", show_alert=True)
         return
 
-    # 🔹 Evitar que el usuario haga doble click: remover teclado inmediatamente
+    # Evitar doble click
     remove_keyboard(chat_id, "✅ Confirmado")
-    bot.answer_callback_query(call.id, "✅ Solicitud enviada")  # confirmación inmediata
+    bot.answer_callback_query(call.id, "✅ Solicitud enviada")
 
     from services.request_service import create_request
     from services.matching_service import notify_nearby_workers
@@ -247,7 +247,7 @@ def handle_client_confirm(call):
     try:
         logger.info(f"[CONFIRM] Creando solicitud para chat_id={chat_id}")
 
-        # Crear solicitud en DB
+        # Crear solicitud
         request_id = create_request(
             client_id=chat_id,
             service_id=service_id,
@@ -287,7 +287,7 @@ Estamos buscando profesionales disponibles para las {time_str} PM.
 
     edit_safe(chat_id, call.message.message_id, text, markup)
 
-    # 🔹 Notificar prestadores de manera asíncrona sin bloquear al usuario
+    # Notificar workers de forma asíncrona
     Thread(
         target=notify_nearby_workers,
         kwargs={
@@ -299,12 +299,18 @@ Estamos buscando profesionales disponibles para las {time_str} PM.
         },
         daemon=True
     ).start()
+
+
 # ==================== CANCELAR SOLICITUD ====================
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("client_cancel_request:"))
 def handle_client_cancel_request(call):
     chat_id = call.message.chat.id
-    request_id = int(call.data.split(":")[1])
+    try:
+        request_id = int(call.data.split(":")[1])
+    except ValueError:
+        bot.answer_callback_query(call.id, "❌ ID de solicitud inválido")
+        return
 
     from services.request_service import update_request_status, get_request
 
