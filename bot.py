@@ -188,30 +188,19 @@ def webhook():
         if update_dict.get("callback_query"):
 
             data = update_dict["callback_query"].get("data", "N/A")
-
             logger.info(f"[WEBHOOK] Callback: {data}")
 
         # ---------------------------------
         # Procesar update en thread
         # ---------------------------------
 
-   update = Update.de_json(update_dict)
+        update = Update.de_json(update_dict)
 
         threading.Thread(
             target=bot.process_new_updates,
             args=([update],),
             daemon=True
         ).start()
-
-        return jsonify({"status": "ok"}), 200
-
-    except Exception as e:
-
-        logger.error(f"[WEBHOOK ERROR] {e}")
-        logger.error(traceback.format_exc())
-
-        return jsonify({"error": "Internal error"}), 500
-
 
 # =========================================================
 # CONFIGURAR WEBHOOK
