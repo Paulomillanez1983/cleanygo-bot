@@ -459,6 +459,12 @@ def get_session(chat_id):
 
 def set_state(chat_id, state, data=None):
     """API compatible"""
+
+    # Si no se pasa data, conservar la data actual
+    if data is None:
+        session = UserSession.get(chat_id)
+        data = session.get("data", {})
+
     return UserSession.set(chat_id, state, data)
 
 def update_data(chat_id, **kwargs):
