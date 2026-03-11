@@ -7,7 +7,7 @@ from config import logger, get_bot, set_state, update_data, get_data, clear_stat
 from models.states import UserState
 from utils.icons import Icons
 from utils.keyboards import get_role_keyboard
-
+from utils.telegram_safe import send_safe, edit_safe, delete_safe, remove_keyboard
 bot = get_bot()
 logger = logging.getLogger(__name__)
 
@@ -104,48 +104,3 @@ def handle_main_menu(message):
     )
 
 
-# ==================== SAFE UTILS ====================
-
-def send_safe(chat_id, text, reply_markup=None, parse_mode="HTML"):
-    try:
-        return bot.send_message(
-            chat_id,
-            text,
-            reply_markup=reply_markup,
-            parse_mode=parse_mode
-        )
-    except Exception as e:
-        logger.error(f"[SEND ERROR] {e} | chat_id={chat_id}")
-        return None
-
-
-def edit_safe(chat_id, message_id, text, reply_markup=None):
-    try:
-        return bot.edit_message_text(
-            text,
-            chat_id,
-            message_id,
-            reply_markup=reply_markup,
-            parse_mode="HTML"
-        )
-    except Exception as e:
-        logger.error(f"[EDIT ERROR] {e} | message_id={message_id}")
-        return None
-
-
-def delete_safe(chat_id, message_id):
-    try:
-        bot.delete_message(chat_id, message_id)
-    except Exception as e:
-        logger.error(f"[DELETE ERROR] {e} | message_id={message_id}")
-
-
-def remove_keyboard(chat_id, text="Procesando..."):
-    try:
-        bot.send_message(
-            chat_id,
-            text,
-            reply_markup=types.ReplyKeyboardRemove()
-        )
-    except Exception as e:
-        logger.error(f"[REMOVE_KB ERROR] {e}")
