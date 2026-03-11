@@ -160,16 +160,32 @@ def webhook():
 
     try:
 
-        if not request.is_json:
-            return jsonify({"error": "JSON required"}), 403
+        # validación
+        ...
 
-        update_dict = request.get_json()
+        # evitar duplicados
+        ...
 
-        if "update_id" not in update_dict:
-            return jsonify({"ignored": True}), 200
+        # logging callback
+        ...
 
-        update_id = update_dict["update_id"]
+        # procesar update
+        update = Update.de_json(update_dict)
 
+        threading.Thread(
+            target=bot.process_new_updates,
+            args=([update],),
+            daemon=True
+        ).start()
+
+        return jsonify({"ok": True}), 200
+
+    except Exception as e:
+
+        logger.error(f"[WEBHOOK ERROR] {e}")
+        logger.error(traceback.format_exc())
+
+        return jsonify({"error": "internal"}), 500
         # ---------------------------------
         # Evitar updates duplicados
         # ---------------------------------
