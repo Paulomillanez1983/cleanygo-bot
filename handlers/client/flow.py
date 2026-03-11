@@ -335,13 +335,15 @@ except Exception as e:
 ⏱️ Tiempo estimado: 2-3 minutos
 """
     
-    markup = types.InlineKeyboardMarkup()
-    markup.add(
-        types.InlineKeyboardButton(
-            f"{Icons.ERROR} Cancelar solicitud",
-            callback_data=f"client_cancel_request:{request_id}"
-        )
+    request_id = get_data(chat_id, "request_id")
+
+markup = types.InlineKeyboardMarkup()
+markup.add(
+    types.InlineKeyboardButton(
+        f"{Icons.ERROR} Cancelar solicitud",
+        callback_data=f"client_cancel_request:{request_id}"
     )
+)
     
     edit_safe(chat_id, call.message.message_id, text, markup)
     
