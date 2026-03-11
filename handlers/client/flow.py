@@ -334,8 +334,8 @@ except Exception as e:
 
 ⏱️ Tiempo estimado: 2-3 minutos
 """
-    
-    request_id = get_data(chat_id, "request_id")
+
+request_id = get_data(chat_id, "request_id")
 
 markup = types.InlineKeyboardMarkup()
 markup.add(
@@ -344,9 +344,9 @@ markup.add(
         callback_data=f"client_cancel_request:{request_id}"
     )
 )
-    
-    edit_safe(chat_id, call.message.message_id, text, markup)
-    
+
+edit_safe(chat_id, call.message.message_id, text, markup)
+
     # Notificar a trabajadores cercanos (esto llama a tu lógica de matching)
     from services.matching_service import notify_nearby_workers
     notified_count = notify_nearby_workers(request_id, lat, lon, service_id)
