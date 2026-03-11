@@ -440,4 +440,3 @@ Presioná finalizar cuando termines.
         )
 
         clear_state(worker_id)
-
