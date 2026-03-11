@@ -4,7 +4,7 @@ VERSIÓN CORREGIDA PARA CLEANYGO
 """
 
 from telebot import types
-from config import logger, get_db_connection, get_bot, set_state
+from config import logger, get_db_connection, set_state
 from models.states import UserState
 from utils.icons import Icons
 from utils.telegram_safe import send_safe, edit_safe
@@ -17,11 +17,16 @@ from services.request_service import (
 import time
 from threading import Thread
 
+# ================= BOT =================
+
 bot = None
+
 def register_handlers(bot_instance):
     global bot
     bot = bot_instance
-# ===================== PRECIOS =====================
+
+
+# ================= PRECIOS =================
 
 SERVICES_PRICES = {
     "niñera": {"name": "Niñera", "price": 15000},
@@ -31,7 +36,7 @@ SERVICES_PRICES = {
 }
 
 
-# ===================== WORKER ACEPTA =====================
+# ================= WORKER ACEPTA =================
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("job_accept:"))
 def handle_job_accept(call):
@@ -56,7 +61,7 @@ def handle_job_accept(call):
 
         return
 
-    request_status = request.get("status", "")
+    request_status = request.get("status")
 
     if request_status not in ("pending", "searching", "waiting_acceptance"):
 
@@ -114,7 +119,10 @@ def handle_job_accept(call):
 
     service_id = request.get("service_id")
 
-    # Obtener precio del worker para este servicio
+    # ================= PRECIO =================
+
+    price = None
+
     try:
 
         with get_db_connection() as conn:
@@ -128,12 +136,11 @@ def handle_job_accept(call):
 
             row = cursor.fetchone()
 
-            price = row["precio"] if row else None
+            if row:
+                price = row["precio"]
 
     except Exception as e:
-
-        logger.error(f"[PRICE ERROR]: {e}")
-        price = None
+        logger.error(f"[PRICE ERROR] {e}")
 
     if price is None:
         price = SERVICES_PRICES.get(service_id, {}).get("price", 0)
@@ -141,10 +148,10 @@ def handle_job_accept(call):
     service_name = SERVICES_PRICES.get(service_id, {"name": service_id})["name"]
 
     text = f"""
-{Icons.PARTY} <b>¡Encontramos tu profesional!</b>
+🎉 <b>¡Encontramos tu profesional!</b>
 
 Servicio: {service_name}
-{Icons.MONEY} Precio: ${price}
+💰 Precio: ${price}
 """
 
     markup = types.InlineKeyboardMarkup()
@@ -163,7 +170,7 @@ Servicio: {service_name}
     send_safe(bot, client_id, text, reply_markup=markup)
 
 
-# ===================== CLIENTE ACEPTA =====================
+# ================= CLIENTE ACEPTA =================
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("client_accept:"))
 def handle_client_accept(call):
@@ -204,7 +211,7 @@ def handle_client_accept(call):
 
     markup.add(
         types.InlineKeyboardButton(
-            f"{Icons.PLAY} Iniciar servicio",
+            f"▶️ Iniciar servicio",
             callback_data=f"start_job:{request_id}"
         )
     )
@@ -212,7 +219,7 @@ def handle_client_accept(call):
     send_safe(bot, worker_id, "Podés iniciar el servicio", reply_markup=markup)
 
 
-# ===================== CLIENTE RECHAZA =====================
+# ================= CLIENTE RECHAZA =================
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("client_reject:"))
 def handle_client_reject(call):
@@ -230,7 +237,7 @@ def handle_client_reject(call):
     )
 
 
-# ===================== WORKER RECHAZA =====================
+# ================= WORKER RECHAZA =================
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("job_reject:"))
 def handle_job_reject(call):
@@ -247,14 +254,12 @@ def handle_job_reject(call):
         f"{Icons.INFO} Trabajo rechazado"
     )
 
-    # Liberar el request para que otro worker lo pueda tomar
     update_request_status(request_id, "searching")
 
 
-# ===================== TRACKING =====================
+# ================= TRACKING =================
 
 active_tracking = {}
-
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("start_job:"))
 def handle_start_job(call):
@@ -272,6 +277,8 @@ def handle_start_job(call):
     update_request_status(request_id, "in_progress")
 
     send_safe(bot, client_id, "El profesional comenzó el servicio")
+
+    active_tracking[worker_id] = {"running": True}
 
     def location_loop():
 
@@ -304,22 +311,26 @@ def handle_start_job(call):
 
             time.sleep(10)
 
-    active_tracking[worker_id] = {"running": True}
-
     Thread(target=location_loop, daemon=True).start()
-    
-    # Enviar botón para finalizar
+
     markup = types.InlineKeyboardMarkup()
+
     markup.add(
         types.InlineKeyboardButton(
-            f"{Icons.CHECK} Finalizar servicio",
+            f"✔️ Finalizar servicio",
             callback_data=f"finish_job:{request_id}"
         )
     )
-    send_safe(bot, worker_id, "Servicio en curso. Cuando termines, hacé clic en finalizar:", reply_markup=markup)
+
+    send_safe(
+        bot,
+        worker_id,
+        "Servicio en curso. Cuando termines, presioná finalizar:",
+        reply_markup=markup
+    )
 
 
-# ===================== FINALIZAR =====================
+# ================= FINALIZAR =================
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("finish_job:"))
 def handle_finish_job(call):
