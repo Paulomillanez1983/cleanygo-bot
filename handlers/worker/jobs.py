@@ -1,6 +1,6 @@
 """
 Handlers para gestión de trabajos/asignaciones para profesionales.
-VERSIÓN FINAL CORREGIDA PARA CLEANYGO
+VERSIÓN CON PRECIO PERSONALIZADO Y TRACKING EN TIEMPO REAL
 """
 
 from telebot import types
@@ -20,7 +20,7 @@ from threading import Thread
 
 active_tracking = {}
 
-# ===================== PRECIOS =====================
+# ===================== PRECIOS (Fallback si no ingresa el worker) =====================
 
 SERVICES_PRICES = {
     "niñera": {"name": "Niñera", "price": 15000},
@@ -65,89 +65,139 @@ def register_handlers(bot):
             )
             return
 
+        # Asignar worker pero mantener estado waiting_price (esperando precio)
         success = assign_worker_to_request_safe(request_id, worker_id)
 
         if not success:
             bot.answer_callback_query(call.id, "❌ No se pudo asignar")
             return
 
-        set_state(worker_id, UserState.JOB_IN_PROGRESS.value, {
+        # Guardar en estado que está esperando ingresar precio
+        set_state(worker_id, UserState.WORKER_ENTERING_PRICE.value, {
             "request_id": request_id,
             "client_id": request.get("client_id") or request.get("client_chat_id"),
             "service_id": request.get("service_id"),
-            "hora": request.get("hora")
+            "hora": request.get("hora"),
+            "message_id": call.message.message_id  # Para editar después
         })
 
-        bot.answer_callback_query(call.id, "✅ Trabajo asignado")
+        bot.answer_callback_query(call.id, "💰 Ingresá el precio del servicio")
+
+        # Pedir al worker que ingrese el precio
+        service_id = request.get("service_id")
+        default_price = SERVICES_PRICES.get(service_id, {}).get("price", 0)
+        service_name = SERVICES_PRICES.get(service_id, {"name": service_id})["name"]
 
         edit_safe(
             worker_id,
             call.message.message_id,
             f"""
-{Icons.SUCCESS} <b>¡Trabajo confirmado!</b>
+{Icons.MONEY} <b>¿Cuál es tu precio para este servicio?</b>
 
-{Icons.INFO} Contactá al cliente
-{Icons.PHONE} Cliente: {request.get('client_id') or request.get('client_chat_id')}
+Servicio: {service_name}
+Hora: {request.get('hora')}
+
+💡 Precio sugerido: ${default_price}
+
+Escribí el monto en números (ej: 18000)
 """
         )
 
-        client_id = request.get("client_id") or request.get("client_chat_id")
 
-        if not client_id:
+    # ===================== WORKER INGRESA PRECIO =====================
+
+    @bot.message_handler(func=lambda m: get_user_state(m.chat.id) == UserState.WORKER_ENTERING_PRICE.value)
+    def handle_worker_price_input(message):
+
+        worker_id = message.chat.id
+        state_data = get_state(worker_id)
+
+        if not state_data:
             return
 
-        service_id = request.get("service_id")
+        request_id = state_data.get("request_id")
+        client_id = state_data.get("client_id")
+        service_id = state_data.get("service_id")
+        hora = state_data.get("hora")
 
-        # Obtener precio del worker
+        # Validar que sea un número
+        try:
+            price = int(message.text.strip())
+            if price <= 0:
+                raise ValueError
+        except ValueError:
+            send_safe(worker_id, f"{Icons.ERROR} Por favor ingresá un número válido (ej: 18000)")
+            return
+
+        # Guardar precio en la solicitud
         try:
             with get_db_connection() as conn:
-
                 cursor = conn.cursor()
-
                 cursor.execute(
-                    "SELECT precio FROM worker_services WHERE chat_id=? AND service_id=?",
-                    (str(worker_id), service_id)
+                    "UPDATE requests SET worker_price = ? WHERE id = ?",
+                    (price, request_id)
                 )
-
-                row = cursor.fetchone()
-                price = row["precio"] if row else None
-
+                conn.commit()
         except Exception as e:
-            logger.error(f"[PRICE ERROR]: {e}")
-            price = None
+            logger.error(f"[PRICE SAVE ERROR]: {e}")
+            send_safe(worker_id, f"{Icons.ERROR} Error guardando el precio. Intentá de nuevo.")
+            return
 
-        if price is None:
-            price = SERVICES_PRICES.get(service_id, {}).get("price", 0)
+        # Cambiar estado del worker
+        set_state(worker_id, UserState.JOB_IN_PROGRESS.value, {
+            "request_id": request_id,
+            "client_id": client_id,
+            "service_id": service_id,
+            "hora": hora,
+            "price": price
+        })
+
+        # Actualizar estado de la solicitud
+        update_request_status(request_id, "waiting_client_acceptance")
 
         service_name = SERVICES_PRICES.get(service_id, {"name": service_id})["name"]
 
+        # Confirmar al worker
+        send_safe(
+            worker_id,
+            f"""
+{Icons.SUCCESS} <b>Precio enviado: ${price}</b>
+
+Esperando que el cliente acepte...
+"""
+        )
+
+        # Notificar al cliente con el precio propuesto
         text = f"""
 {Icons.PARTY} <b>¡Encontramos tu profesional!</b>
 
 Servicio: {service_name}
-{Icons.MONEY} Precio: ${price}
+{Icons.CLOCK} Hora: {hora}
+{Icons.MONEY} <b>Precio: ${price}</b>
+
+¿Aceptás este presupuesto?
 """
 
         markup = types.InlineKeyboardMarkup()
 
         markup.add(
             types.InlineKeyboardButton(
-                f"{Icons.SUCCESS} Acepto",
-                callback_data=f"client_accept:{request_id}"
+                f"{Icons.SUCCESS} Sí, acepto",
+                callback_data=f"client_accept_price:{request_id}"
             ),
             types.InlineKeyboardButton(
-                f"{Icons.ERROR} No acepto",
-                callback_data=f"client_reject:{request_id}"
+                f"{Icons.ERROR} No, rechazo",
+                callback_data=f"client_reject_price:{request_id}"
             )
         )
 
         send_safe(client_id, text, reply_markup=markup)
 
 
-    # ===================== CLIENTE ACEPTA =====================
+    # ===================== CLIENTE ACEPTA PRECIO =====================
 
-    @bot.callback_query_handler(func=lambda c: c.data.startswith("client_accept:"))
-    def handle_client_accept(call):
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("client_accept_price:"))
+    def handle_client_accept_price(call):
 
         client_id = call.message.chat.id
         request_id = int(call.data.split(":")[1])
@@ -157,37 +207,87 @@ Servicio: {service_name}
         if not request:
             return
 
+        # Obtener datos
+        worker_id = request.get("worker_id") or request.get("worker_chat_id")
+        price = request.get("worker_price", 0)
+        service_id = request.get("service_id")
+        service_name = SERVICES_PRICES.get(service_id, {"name": service_id})["name"]
+
         update_request_status(request_id, "accepted")
 
         edit_safe(
             client_id,
             call.message.message_id,
-            f"{Icons.SUCCESS} Servicio aceptado"
-        )
+            f"""
+{Icons.SUCCESS} <b>¡Servicio confirmado!</b>
 
-        worker_id = request.get("worker_id") or request.get("worker_chat_id")
+Servicio: {service_name}
+{Icons.MONEY} Precio acordado: ${price}
+
+El profesional está en camino. Podés ver su ubicación en tiempo real 📍
+"""
+        )
 
         if not worker_id:
             return
 
-        send_safe(worker_id, f"{Icons.SUCCESS} El cliente aceptó el servicio")
+        # Notificar al worker
+        send_safe(
+            worker_id,
+            f"""
+{Icons.SUCCESS} <b>¡El cliente aceptó!</b>
+
+Precio: ${price}
+{Icons.ROCKET} Podés iniciar el servicio
+"""
+        )
 
         markup = types.InlineKeyboardMarkup()
 
         markup.add(
             types.InlineKeyboardButton(
-                f"{Icons.PLAY} Iniciar servicio",
-                callback_data=f"start_job:{request_id}"
+                f"{Icons.PLAY} Iniciar servicio y compartir ubicación",
+                callback_data=f"start_job_tracking:{request_id}"
             )
         )
 
-        send_safe(worker_id, "Podés iniciar el servicio", reply_markup=markup)
+        send_safe(worker_id, "Presioná cuando estés en camino:", reply_markup=markup)
 
 
-    # ===================== START JOB =====================
+    # ===================== CLIENTE RECHAZA PRECIO =====================
 
-    @bot.callback_query_handler(func=lambda c: c.data.startswith("start_job:"))
-    def handle_start_job(call):
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("client_reject_price:"))
+    def handle_client_reject_price(call):
+
+        client_id = call.message.chat.id
+        request_id = int(call.data.split(":")[1])
+
+        request = get_request(request_id)
+
+        if not request:
+            return
+
+        worker_id = request.get("worker_id") or request.get("worker_chat_id")
+
+        update_request_status(request_id, "rejected")
+
+        edit_safe(
+            client_id,
+            call.message.message_id,
+            f"{Icons.ERROR} Solicitud cancelada. Buscando otro profesional..."
+        )
+
+        if worker_id:
+            send_safe(worker_id, f"{Icons.ERROR} El cliente no aceptó el precio. Buscando otros trabajos...")
+            set_state(worker_id, UserState.SELECTING_ROLE.value)
+
+        # Volver a buscar otro worker (lógica adicional según necesites)
+
+
+    # ===================== START JOB CON TRACKING =====================
+
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("start_job_tracking:"))
+    def handle_start_job_tracking(call):
 
         worker_id = call.message.chat.id
         request_id = int(call.data.split(":")[1])
@@ -201,8 +301,36 @@ Servicio: {service_name}
 
         update_request_status(request_id, "in_progress")
 
-        send_safe(client_id, "El profesional comenzó el servicio")
+        # Notificar al cliente que el profesional inició
+        send_safe(
+            client_id,
+            f"""
+{Icons.SUCCESS} <b>¡El profesional está en camino!</b>
 
+📍 Recibirás su ubicación actualizada cada 10 segundos.
+"""
+        )
+
+        # Enviar ubicación inicial
+        try:
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT lat, lon FROM workers WHERE chat_id=?",
+                    (str(worker_id),)
+                )
+                data = cursor.fetchone()
+
+            if data and data["lat"] and data["lon"]:
+                bot.send_location(
+                    client_id,
+                    latitude=data["lat"],
+                    longitude=data["lon"]
+                )
+        except Exception as e:
+            logger.error(f"[INITIAL LOCATION ERROR] {e}")
+
+        # Iniciar tracking en tiempo real
         def location_loop():
 
             while active_tracking.get(worker_id, {}).get("running"):
@@ -237,6 +365,18 @@ Servicio: {service_name}
 
         Thread(target=location_loop, daemon=True).start()
 
+        # Editar mensaje del worker
+        edit_safe(
+            worker_id,
+            call.message.message_id,
+            f"""
+{Icons.SUCCESS} <b>Servicio iniciado</b>
+
+📍 Estás compartiendo tu ubicación con el cliente.
+Presioná finalizar cuando termines.
+"""
+        )
+
         markup = types.InlineKeyboardMarkup()
         markup.add(
             types.InlineKeyboardButton(
@@ -247,7 +387,7 @@ Servicio: {service_name}
 
         send_safe(
             worker_id,
-            "Servicio en curso. Cuando termines, presioná finalizar.",
+            "Cuando llegues y completes el trabajo:",
             reply_markup=markup
         )
 
@@ -266,6 +406,7 @@ Servicio: {service_name}
             return
 
         client_id = request.get("client_id") or request.get("client_chat_id")
+        price = request.get("worker_price", 0)
 
         if worker_id in active_tracking:
             active_tracking[worker_id]["running"] = False
@@ -273,8 +414,66 @@ Servicio: {service_name}
 
         update_request_status(request_id, "completed")
 
-        send_safe(client_id, "✅ Servicio finalizado")
+        # Notificar al cliente
+        send_safe(
+            client_id,
+            f"""
+{Icons.CHECK} <b>Servicio finalizado</b>
 
-        send_safe(worker_id, "🎉 Gracias por tu trabajo")
+{Icons.MONEY} Monto a pagar: ${price}
+
+¡Gracias por usar CleanYGo!
+"""
+        )
+
+        # Notificar al worker
+        send_safe(
+            worker_id,
+            f"""
+{Icons.PARTY} <b>¡Trabajo completado!</b>
+
+{Icons.MONEY} Cobro: ${price}
+{Icons.STAR} ¡Excelente trabajo!
+"""
+        )
 
         set_state(worker_id, UserState.SELECTING_ROLE.value)
+
+
+# ===================================================
+# HELPERS (agregar en states.py o donde corresponda)
+# ===================================================
+
+def get_user_state(chat_id):
+    """Obtener estado actual del usuario"""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT state FROM user_states WHERE chat_id = ?",
+                (str(chat_id),)
+            )
+            row = cursor.fetchone()
+            return row["state"] if row else None
+    except Exception as e:
+        logger.error(f"[GET STATE ERROR]: {e}")
+        return None
+
+
+def get_state(chat_id):
+    """Obtener estado y datos del usuario"""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT state, data FROM user_states WHERE chat_id = ?",
+                (str(chat_id),)
+            )
+            row = cursor.fetchone()
+            if row and row["data"]:
+                import json
+                return json.loads(row["data"])
+            return {}
+    except Exception as e:
+        logger.error(f"[GET STATE DATA ERROR]: {e}")
+        return {}
