@@ -170,17 +170,16 @@ def handle_time_minute(call):
 
 def proceed_to_location(chat_id: int, message_id: int):
 
-    session = get_session(chat_id)
+    service_id = get_data(chat_id, "service_id")
+    time_str = get_data(chat_id, "selected_time")
 
-    service_id = session["data"].get("service_id")
-    time_str = session["data"].get("selected_time")
-
-    logger.info(f"[CLIENT DATA] {session['data']}")
+    logger.info(f"[CLIENT DATA] service={service_id} time={time_str}")
 
     if not service_id:
         send_safe(chat_id, f"{Icons.ERROR} Error: sesión expirada. Usá /start.")
         return
 
+    # cambiar estado DESPUÉS
     set_state(chat_id, UserState.CLIENT_SHARING_LOCATION.value)
 
     text = f"""
