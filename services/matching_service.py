@@ -1,18 +1,20 @@
 """
 Matching service
-Encuentra workers cercanos y envía solicitudes
+Conecta clientes y workers:
+- Notifica workers cercanos
+- Maneja aceptación/rechazo de workers
+- Notifica al cliente sobre cambios en la solicitud
 """
 
 from telebot import types
 from config import get_bot, logger
 from services.worker_service import find_available_workers
-from services.request_service import assign_worker_to_request_safe
+from services.request_service import assign_worker_to_request_safe, get_request
 
-# 🔹 Obtenemos la instancia real del bot
+# 🔹 Bot
 bot = get_bot()
 
 MAX_WORKERS_NOTIFY = 5
-
 
 # =====================================================
 # NOTIFICAR WORKERS
@@ -33,7 +35,6 @@ def notify_nearby_workers(request_id, service_name, lat, lon, hora):
             return 0
 
         notified = 0
-
         for worker in workers[:MAX_WORKERS_NOTIFY]:
             worker_id = worker[0]
             worker_name = worker[1]
@@ -60,7 +61,6 @@ def notify_nearby_workers(request_id, service_name, lat, lon, hora):
 
 ¿Aceptar trabajo?
 """
-
             try:
                 bot.send_message(worker_id, text, reply_markup=markup)
                 notified += 1
@@ -91,6 +91,10 @@ def handle_worker_accept(worker_id, request_id):
 
         bot.send_message(worker_id, "✅ Has aceptado el trabajo correctamente.")
         logger.info(f"[MATCHING] Worker {worker_id} aceptó request {request_id}")
+
+        # Notificar al cliente
+        _notify_client(request_id, worker_name=None, accepted=True)
+
         return True
 
     except Exception as e:
@@ -106,9 +110,42 @@ def handle_worker_reject(worker_id, request_id):
     Worker rechaza un trabajo
     """
     try:
+        bot.send_message(worker_id, "❌ Solicitud rechazada.")
         logger.info(f"[MATCHING] Worker {worker_id} rechazó request {request_id}")
-        bot.send_message(worker_id, "Solicitud rechazada.")
+
+        # Notificar al cliente
+        _notify_client(request_id, worker_name=None, accepted=False)
+
         return True
     except Exception as e:
         logger.error(f"[MATCHING ERROR] handle_worker_reject: {e}")
         return False
+
+
+# =====================================================
+# NOTIFICAR CLIENTE
+# =====================================================
+def _notify_client(request_id, worker_name=None, accepted=True):
+    """
+    Envía mensaje al cliente sobre la aceptación/rechazo de un worker
+    """
+    try:
+        request = get_request(request_id)
+        if not request:
+            logger.warning(f"[CLIENT NOTIFY] Request {request_id} no encontrada")
+            return
+
+        client_id = request.get("client_id")
+        if not client_id:
+            logger.warning(f"[CLIENT NOTIFY] Request {request_id} sin client_id")
+            return
+
+        if accepted:
+            text = f"✅ Un profesional aceptó tu solicitud. ¡Pronto se contactará contigo!"
+        else:
+            text = f"❌ Un profesional rechazó tu solicitud. Estamos buscando otro."
+
+        bot.send_message(client_id, text)
+
+    except Exception as e:
+        logger.error(f"[CLIENT NOTIFY ERROR] request {request_id}: {e}")
