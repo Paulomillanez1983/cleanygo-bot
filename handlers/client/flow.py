@@ -83,42 +83,64 @@ def handle_quick_time(call):
 
     chat_id = call.message.chat.id
 
-    parts = call.data.split(":")
-    time_str = f"{parts[1]}:{parts[2]}"
+    try:
+        parts = call.data.split(":")
 
-    update_data(chat_id, selected_time=time_str, time_period="PM")
+        # soporta time_quick:18:00 o time_quick:18
+        if len(parts) == 3:
+            hour = parts[1]
+            minute = parts[2]
+        elif len(parts) == 2:
+            hour = parts[1]
+            minute = "00"
+        else:
+            raise ValueError("Formato inválido")
 
-    bot.answer_callback_query(call.id, f"Hora: {time_str} PM")
+        time_str = f"{hour}:{minute}"
 
-    proceed_to_location(chat_id, call.message.message_id)
+        update_data(chat_id, selected_time=time_str, time_period="PM")
+
+        bot.answer_callback_query(call.id, f"Hora: {time_str} PM")
+
+        proceed_to_location(chat_id, call.message.message_id)
+
+    except Exception as e:
+        logger.error(f"[TIME QUICK ERROR] {e}")
+        bot.answer_callback_query(call.id, "❌ Error seleccionando hora", show_alert=True)
 
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("time_h:"))
 def handle_time_hour(call):
 
     chat_id = call.message.chat.id
-    hour = call.data.split(":")[1]
 
-    update_data(chat_id, temp_hour=hour)
+    try:
+        hour = call.data.split(":")[1]
 
-    bot.answer_callback_query(call.id)
+        update_data(chat_id, temp_hour=hour)
 
-    markup = types.InlineKeyboardMarkup(row_width=4)
+        bot.answer_callback_query(call.id)
 
-    for minute in ["00", "15", "30", "45"]:
-        markup.add(
-            types.InlineKeyboardButton(
-                f"{hour}:{minute}",
-                callback_data=f"time_m:{hour}:{minute}"
+        markup = types.InlineKeyboardMarkup(row_width=4)
+
+        for minute in ["00", "15", "30", "45"]:
+            markup.add(
+                types.InlineKeyboardButton(
+                    f"{hour}:{minute}",
+                    callback_data=f"time_m:{hour}:{minute}"
+                )
             )
+
+        edit_safe(
+            chat_id,
+            call.message.message_id,
+            f"{Icons.CLOCK} Seleccioná los minutos:",
+            markup
         )
 
-    edit_safe(
-        chat_id,
-        call.message.message_id,
-        f"{Icons.CLOCK} Seleccioná los minutos:",
-        markup
-    )
+    except Exception as e:
+        logger.error(f"[TIME HOUR ERROR] {e}")
+        bot.answer_callback_query(call.id, "❌ Error seleccionando hora", show_alert=True)
 
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("time_m:"))
@@ -126,17 +148,22 @@ def handle_time_minute(call):
 
     chat_id = call.message.chat.id
 
-    parts = call.data.split(":")
-    hour = parts[1]
-    minute = parts[2]
+    try:
+        parts = call.data.split(":")
+        hour = parts[1]
+        minute = parts[2]
 
-    time_str = f"{hour}:{minute}"
+        time_str = f"{hour}:{minute}"
 
-    update_data(chat_id, selected_time=time_str, time_period="PM")
+        update_data(chat_id, selected_time=time_str, time_period="PM")
 
-    bot.answer_callback_query(call.id, f"Hora: {time_str} PM")
+        bot.answer_callback_query(call.id, f"Hora: {time_str} PM")
 
-    proceed_to_location(chat_id, call.message.message_id)
+        proceed_to_location(chat_id, call.message.message_id)
+
+    except Exception as e:
+        logger.error(f"[TIME MINUTE ERROR] {e}")
+        bot.answer_callback_query(call.id, "❌ Error seleccionando minutos", show_alert=True)
 
 
 # ==================== UBICACIÓN ====================
