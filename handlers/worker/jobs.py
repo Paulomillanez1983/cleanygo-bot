@@ -59,7 +59,6 @@ def register_handlers(bot):
             bot.answer_callback_query(call.id, "❌ Este trabajo ya fue tomado")
 
             edit_safe(
-                bot,
                 worker_id,
                 call.message.message_id,
                 f"{Icons.ERROR} <b>Trabajo no disponible</b>"
@@ -82,7 +81,6 @@ def register_handlers(bot):
         bot.answer_callback_query(call.id, "✅ Trabajo asignado")
 
         edit_safe(
-            bot,
             worker_id,
             call.message.message_id,
             f"""
@@ -143,7 +141,7 @@ Servicio: {service_name}
             )
         )
 
-        send_safe(bot, client_id, text, reply_markup=markup)
+        send_safe(client_id, text, reply_markup=markup)
 
 
     # ===================== CLIENTE ACEPTA =====================
@@ -162,7 +160,6 @@ Servicio: {service_name}
         update_request_status(request_id, "accepted")
 
         edit_safe(
-            bot,
             client_id,
             call.message.message_id,
             f"{Icons.SUCCESS} Servicio aceptado"
@@ -173,7 +170,7 @@ Servicio: {service_name}
         if not worker_id:
             return
 
-        send_safe(bot, worker_id, f"{Icons.SUCCESS} El cliente aceptó el servicio")
+        send_safe(worker_id, f"{Icons.SUCCESS} El cliente aceptó el servicio")
 
         markup = types.InlineKeyboardMarkup()
 
@@ -184,7 +181,7 @@ Servicio: {service_name}
             )
         )
 
-        send_safe(bot, worker_id, "Podés iniciar el servicio", reply_markup=markup)
+        send_safe(worker_id, "Podés iniciar el servicio", reply_markup=markup)
 
 
     # ===================== START JOB =====================
@@ -204,7 +201,7 @@ Servicio: {service_name}
 
         update_request_status(request_id, "in_progress")
 
-        send_safe(bot, client_id, "El profesional comenzó el servicio")
+        send_safe(client_id, "El profesional comenzó el servicio")
 
         def location_loop():
 
@@ -249,7 +246,6 @@ Servicio: {service_name}
         )
 
         send_safe(
-            bot,
             worker_id,
             "Servicio en curso. Cuando termines, presioná finalizar.",
             reply_markup=markup
@@ -277,8 +273,8 @@ Servicio: {service_name}
 
         update_request_status(request_id, "completed")
 
-        send_safe(bot, client_id, "✅ Servicio finalizado")
+        send_safe(client_id, "✅ Servicio finalizado")
 
-        send_safe(bot, worker_id, "🎉 Gracias por tu trabajo")
+        send_safe(worker_id, "🎉 Gracias por tu trabajo")
 
         set_state(worker_id, UserState.SELECTING_ROLE.value)
