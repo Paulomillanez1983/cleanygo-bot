@@ -296,13 +296,12 @@ def handle_client_confirm(call):
     
     try:
         request_id = create_request(
-            client_id=chat_id,
-            service_id=service_id,
-            service_name=service_name,
-            lat=lat,
-            lon=lon,
-            hora=time_str
-        )
+          client_id=chat_id,
+          service_id=service_id,
+          hora=time_str,
+          lat=lat,
+          lon=lon
+       )
         
         logger.info(f"[REQUEST] Creada solicitud {request_id} para {chat_id}")
         
