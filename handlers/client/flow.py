@@ -295,24 +295,25 @@ def handle_client_confirm(call):
     from services.request_service import create_request
     
     try:
-        request_id = create_request(
-          client_id=chat_id,
-          service_id=service_id,
-          hora=time_str,
-          lat=lat,
-          lon=lon
-      )
+    try:
+    request_id = create_request(
+        client_id=chat_id,
+        service_id=service_id,
+        hora=time_str,
+        lat=lat,
+        lon=lon
+    )
 
-      if not request_id:
-          bot.answer_callback_query(call.id, "❌ Error creando solicitud", show_alert=True)
-           return
-        
-        logger.info(f"[REQUEST] Creada solicitud {request_id} para {chat_id}")
-        
-    except Exception as e:
-        logger.error(f"[REQUEST CREATE ERROR] {e}")
+    if not request_id:
         bot.answer_callback_query(call.id, "❌ Error creando solicitud", show_alert=True)
         return
+
+    logger.info(f"[REQUEST] Creada solicitud {request_id} para {chat_id}")
+
+except Exception as e:
+    logger.error(f"[REQUEST CREATE ERROR] {e}")
+    bot.answer_callback_query(call.id, "❌ Error creando solicitud", show_alert=True)
+    return
     
     # Cambiar estado a esperando aceptación
     set_state(chat_id, UserState.CLIENT_WAITING_ACCEPTANCE.value, {
