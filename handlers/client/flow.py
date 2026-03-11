@@ -3,7 +3,6 @@ Client flow - Solo flujo de mensajes, NO callbacks
 """
 import logging
 from telebot import types
-
 from config import logger, get_bot, set_state, update_data, get_data, clear_state, get_session
 from models.states import UserState
 from models.services_data import SERVICES
@@ -27,7 +26,6 @@ def get_service_display(service_id: str) -> str:
 # ==================== INICIO ====================
 
 def start_client_flow(chat_id):
-
     clear_state(chat_id)
 
     set_state(chat_id, UserState.CLIENT_SELECTING_SERVICE.value, {
@@ -35,7 +33,6 @@ def start_client_flow(chat_id):
     })
 
     text = f"{Icons.SEARCH} <b>¿Qué servicio necesitás?</b>\n\nSeleccioná una opción:"
-
     markup = types.InlineKeyboardMarkup(row_width=1)
 
     for svc_id, svc in SERVICES.items():
@@ -47,7 +44,6 @@ def start_client_flow(chat_id):
         )
 
     send_safe(chat_id, text, markup)
-
     logger.info(f"[CLIENT FLOW] Iniciado | chat_id={chat_id}")
 
 
@@ -55,7 +51,6 @@ def start_client_flow(chat_id):
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("client_svc:"))
 def handle_client_service_selection(call):
-
     chat_id = call.message.chat.id
     service_id = call.data.split(":")[1]
 
@@ -66,14 +61,12 @@ def handle_client_service_selection(call):
     )
 
     set_state(chat_id, UserState.CLIENT_SELECTING_TIME.value)
-
     bot.answer_callback_query(call.id)
 
     text = (
         f"{Icons.CLOCK} <b>¿Para qué hora lo necesitás?</b>\n\n"
         f"Servicio: {get_service_display(service_id)}"
     )
-
     edit_safe(chat_id, call.message.message_id, text, get_time_selector())
 
 
@@ -81,50 +74,31 @@ def handle_client_service_selection(call):
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("time_quick:"))
 def handle_quick_time(call):
-
     chat_id = call.message.chat.id
-
     try:
-
         parts = call.data.split(":")
-
-        if len(parts) == 3:
-            hour = parts[1]
-            minute = parts[2]
-        else:
-            hour = parts[1]
-            minute = "00"
-
+        hour = parts[1]
+        minute = parts[2] if len(parts) == 3 else "00"
         time_str = f"{hour}:{minute}"
 
         update_data(chat_id, selected_time=time_str, time_period="PM")
-
         bot.answer_callback_query(call.id, f"Hora: {time_str} PM")
-
         proceed_to_location(chat_id, call.message.message_id)
 
     except Exception as e:
-
         logger.error(f"[TIME QUICK ERROR] {e}")
-
         bot.answer_callback_query(call.id, "❌ Error seleccionando hora", show_alert=True)
 
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("time_h:"))
 def handle_time_hour(call):
-
     chat_id = call.message.chat.id
-
     try:
-
         hour = call.data.split(":")[1]
-
         update_data(chat_id, temp_hour=hour)
-
         bot.answer_callback_query(call.id)
 
         markup = types.InlineKeyboardMarkup(row_width=4)
-
         for minute in ["00", "15", "30", "45"]:
             markup.add(
                 types.InlineKeyboardButton(
@@ -133,51 +107,33 @@ def handle_time_hour(call):
                 )
             )
 
-        edit_safe(
-            chat_id,
-            call.message.message_id,
-            f"{Icons.CLOCK} Seleccioná los minutos:",
-            markup
-        )
+        edit_safe(chat_id, call.message.message_id, f"{Icons.CLOCK} Seleccioná los minutos:", markup)
 
     except Exception as e:
-
         logger.error(f"[TIME HOUR ERROR] {e}")
-
         bot.answer_callback_query(call.id, "❌ Error seleccionando hora", show_alert=True)
 
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("time_m:"))
 def handle_time_minute(call):
-
     chat_id = call.message.chat.id
-
     try:
-
         parts = call.data.split(":")
-
-        hour = parts[1]
-        minute = parts[2]
-
+        hour, minute = parts[1], parts[2]
         time_str = f"{hour}:{minute}"
 
         update_data(chat_id, selected_time=time_str, time_period="PM")
-
         bot.answer_callback_query(call.id, f"Hora: {time_str} PM")
-
         proceed_to_location(chat_id, call.message.message_id)
 
     except Exception as e:
-
         logger.error(f"[TIME MINUTE ERROR] {e}")
-
         bot.answer_callback_query(call.id, "❌ Error seleccionando minutos", show_alert=True)
 
 
 # ==================== UBICACIÓN ====================
 
 def proceed_to_location(chat_id: int, message_id: int):
-
     service_id = get_data(chat_id, "service_id")
     time_str = get_data(chat_id, "selected_time")
 
@@ -195,40 +151,26 @@ Hora: {time_str} PM
 
 Enviá tu ubicación.
 """
-
     delete_safe(chat_id, message_id)
+    send_safe(chat_id, text, get_location_keyboard())
 
-    send_safe(
-        chat_id,
-        text,
-        get_location_keyboard()
-    )
-
-
-# ==================== RECIBIR UBICACIÓN ====================
 
 def _is_client_sharing_location(message):
-
     session = get_session(message.chat.id)
-
     return session.get("state") == UserState.CLIENT_SHARING_LOCATION.value
 
 
 @bot.message_handler(content_types=['location'], func=_is_client_sharing_location)
 def handle_client_location(message):
-
     chat_id = message.chat.id
-
     lat = message.location.latitude
     lon = message.location.longitude
 
     service_id = get_data(chat_id, "service_id")
     time_str = get_data(chat_id, "selected_time")
-
     update_data(chat_id, lat=lat, lon=lon)
 
     remove_keyboard(chat_id, "✅ Ubicación recibida")
-
     set_state(chat_id, UserState.CLIENT_CONFIRMING.value)
 
     text = f"""
@@ -240,26 +182,18 @@ Ubicación: {lat:.4f}, {lon:.4f}
 
 ¿Todo correcto?
 """
-
-    send_safe(
-        chat_id,
-        text,
-        get_confirmation_keyboard()
-    )
+    send_safe(chat_id, text, get_confirmation_keyboard())
 
 
 # ==================== CLIENTE ESPERANDO ====================
 
 def _is_client_waiting_acceptance(message):
-
     session = get_session(message.chat.id)
-
     return session.get("state") == UserState.CLIENT_WAITING_ACCEPTANCE.value
 
 
 @bot.message_handler(func=_is_client_waiting_acceptance)
 def handle_client_waiting_message(message):
-
     chat_id = message.chat.id
     request_id = get_data(chat_id, "request_id")
 
@@ -274,7 +208,6 @@ Te avisaremos cuando alguien acepte.
 
 ¿Querés cancelar la solicitud?
 """
-
     markup = types.InlineKeyboardMarkup()
     markup.add(
         types.InlineKeyboardButton(
@@ -282,7 +215,6 @@ Te avisaremos cuando alguien acepte.
             callback_data=f"client_cancel_request:{request_id}"
         )
     )
-
     send_safe(chat_id, text, markup)
 
 
@@ -290,7 +222,6 @@ Te avisaremos cuando alguien acepte.
 
 @bot.callback_query_handler(func=lambda c: c.data == "confirm_yes")
 def handle_client_confirm(call):
-
     chat_id = call.message.chat.id
     service_id = get_data(chat_id, "service_id")
     service_name = get_data(chat_id, "service_name")
@@ -306,7 +237,7 @@ def handle_client_confirm(call):
     from services.matching_service import notify_nearby_workers
 
     try:
-        # Crear solicitud en DB
+        logger.info(f"[CONFIRM] Antes de create_request")
         request_id = create_request(
             client_id=chat_id,
             service_id=service_id,
@@ -314,23 +245,18 @@ def handle_client_confirm(call):
             lat=lat,
             lon=lon
         )
+        logger.info(f"[CONFIRM] request_id={request_id} creado")
 
         if not request_id:
             bot.answer_callback_query(call.id, "❌ Error creando solicitud", show_alert=True)
             return
-
-        logger.info(f"[REQUEST] Creada solicitud {request_id}")
 
     except Exception as e:
         logger.error(f"[REQUEST CREATE ERROR] {e}")
         bot.answer_callback_query(call.id, "❌ Error creando solicitud", show_alert=True)
         return
 
-    # Cambiar estado del cliente a esperando aceptación
-    set_state(chat_id, UserState.CLIENT_WAITING_ACCEPTANCE.value, {
-        "request_id": request_id
-    })
-
+    set_state(chat_id, UserState.CLIENT_WAITING_ACCEPTANCE.value, {"request_id": request_id})
     bot.answer_callback_query(call.id, "✅ Solicitud enviada")
 
     # Mensaje de confirmación
@@ -350,39 +276,37 @@ Estamos buscando profesionales disponibles para las {time_str} PM.
     )
     edit_safe(chat_id, call.message.message_id, text, markup)
 
-    # Notificar prestadores cercanos
-    notify_nearby_workers(
-        request_id=request_id,
-        service_name=service_name,  # nombre del servicio
-        lat=lat,
-        lon=lon,
-        hora=time_str
-    )
+    # 🔹 Notificar prestadores de manera asíncrona
+    from threading import Thread
+    Thread(
+        target=notify_nearby_workers,
+        kwargs={
+            "request_id": request_id,
+            "service_name": service_name,
+            "lat": lat,
+            "lon": lon,
+            "hora": time_str
+        },
+        daemon=True
+    ).start()
+
 
 # ==================== CANCELAR SOLICITUD ====================
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("client_cancel_request:"))
 def handle_client_cancel_request(call):
-
     chat_id = call.message.chat.id
     request_id = int(call.data.split(":")[1])
 
     from services.request_service import update_request_status, get_request
 
     request = get_request(request_id)
-
     if not request:
         bot.answer_callback_query(call.id, "❌ Solicitud no encontrada")
         return
 
     update_request_status(request_id, "cancelled_by_client")
-
     bot.answer_callback_query(call.id, "✅ Solicitud cancelada")
 
-    edit_safe(
-        chat_id,
-        call.message.message_id,
-        f"{Icons.ERROR} Solicitud cancelada."
-    )
-
+    edit_safe(chat_id, call.message.message_id, f"{Icons.ERROR} Solicitud cancelada.")
     clear_state(chat_id)
