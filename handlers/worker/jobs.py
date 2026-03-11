@@ -4,9 +4,8 @@ VERSIÓN CON PRECIO PERSONALIZADO Y TRACKING EN TIEMPO REAL
 """
 
 from telebot import types
-from config import logger, get_db_connection, set_state, get_data, clear_state
-from models import states  # Importar el módulo completo, no solo los objetos
-from models.states import UserState
+from config import logger, get_db_connection
+from models.states import UserState, set_state, get_data, clear_state, get_state
 from utils.icons import Icons
 from utils.telegram_safe import send_safe, edit_safe
 from services.request_service import (
@@ -74,7 +73,7 @@ def register_handlers(bot):
             return
 
         # Guardar en estado que está esperando ingresar precio
-        set_state(worker_id, UserState.WORKER_ENTERING_PRICE.value, {
+        set_state(worker_id, UserState.WORKER_ENTERING_PRICE, {
             "request_id": request_id,
             "client_id": request.get("client_id") or request.get("client_chat_id"),
             "service_id": request.get("service_id"),
@@ -83,8 +82,7 @@ def register_handlers(bot):
         })
 
         # Verificar que se guardó
-        logger.info(f"[STATE SET] worker_id={worker_id}, state={UserState.WORKER_ENTERING_PRICE.value}")
-        logger.info(f"[STATE VERIFY] current_state={states._state_store.get(worker_id)}")
+        logger.info(f"[STATE SET] worker_id={worker_id}, state={get_state(worker_id)}")
 
         bot.answer_callback_query(call.id, "💰 Ingresá el precio del servicio")
 
@@ -113,9 +111,10 @@ Escribí el monto en números (ej: 18000)
 
     def check_worker_entering_price(message):
         """Verificar si el usuario está en estado WORKER_ENTERING_PRICE"""
-        current_state = states._state_store.get(message.chat.id)  # Acceder vía el módulo
-        logger.info(f"[CHECK STATE] chat_id={message.chat.id}, state={current_state}, store_id={id(states._state_store)}")
-        return current_state == UserState.WORKER_ENTERING_PRICE.value
+        current_state = get_state(message.chat.id)
+        expected = UserState.WORKER_ENTERING_PRICE.value
+        logger.info(f"[CHECK STATE] chat_id={message.chat.id}, state={current_state}, expected={expected}")
+        return current_state == expected
 
     @bot.message_handler(func=check_worker_entering_price)
     def handle_worker_price_input(message):
@@ -162,7 +161,7 @@ Escribí el monto en números (ej: 18000)
             return
 
         # Cambiar estado del worker
-        set_state(worker_id, UserState.JOB_IN_PROGRESS.value, {
+        set_state(worker_id, UserState.JOB_IN_PROGRESS, {
             "request_id": request_id,
             "client_id": client_id,
             "service_id": service_id,
