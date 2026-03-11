@@ -106,15 +106,26 @@ Escribí el monto en números (ej: 18000)
 
     # ===================== WORKER INGRESA PRECIO =====================
 
-    @bot.message_handler(func=lambda m: get_state(m.chat.id) == UserState.WORKER_ENTERING_PRICE.value)
+    def check_worker_entering_price(message):
+        """Verificar si el usuario está en estado WORKER_ENTERING_PRICE"""
+        current_state = get_state(message.chat.id)
+        logger.info(f"[CHECK STATE] chat_id={message.chat.id}, state={current_state}")
+        return current_state == UserState.WORKER_ENTERING_PRICE.value
+
+    @bot.message_handler(func=check_worker_entering_price)
     def handle_worker_price_input(message):
 
         worker_id = message.chat.id
         
+        logger.info(f"[PRICE INPUT] chat_id={worker_id}, text={message.text}")
+        
         # Obtener datos del estado
         state_data = get_data(worker_id)
         
+        logger.info(f"[STATE DATA] {state_data}")
+        
         if not state_data:
+            logger.error(f"[PRICE ERROR] No state data for {worker_id}")
             return
 
         request_id = state_data.get("request_id")
