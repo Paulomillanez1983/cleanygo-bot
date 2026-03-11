@@ -301,7 +301,11 @@ def handle_client_confirm(call):
           hora=time_str,
           lat=lat,
           lon=lon
-       )
+      )
+
+      if not request_id:
+          bot.answer_callback_query(call.id, "❌ Error creando solicitud", show_alert=True)
+           return
         
         logger.info(f"[REQUEST] Creada solicitud {request_id} para {chat_id}")
         
