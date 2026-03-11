@@ -241,3 +241,34 @@ Ubicación: {lat:.4f}, {lon:.4f}
         text,
         get_confirmation_keyboard()
     )
+# ==================== CLIENTE ESPERANDO OFERTA ====================
+
+def _is_client_waiting_acceptance(message):
+    """Verificar si el cliente está esperando que un trabajador acepte"""
+    session = get_session(message.chat.id)
+    return session.get("state") == UserState.CLIENT_WAITING_ACCEPTANCE.value
+
+@bot.message_handler(func=_is_client_waiting_acceptance)
+def handle_client_waiting_message(message):
+    """
+    Maneja mensajes de clientes que están esperando ofertas.
+    Informa que debe esperar o puede cancelar.
+    """
+    chat_id = message.chat.id
+    
+    text = f"""
+{Icons.CLOCK} <b>Estás esperando que un profesional acepte tu solicitud...</b>
+
+Por favor, esperá unos momentos. Te notificaremos cuando alguien acepte.
+
+¿Querés cancelar la solicitud?
+"""
+    markup = types.InlineKeyboardMarkup()
+    markup.add(
+        types.InlineKeyboardButton(
+            f"{Icons.ERROR} Cancelar solicitud",
+            callback_data="client_cancel_request"
+        )
+    )
+    
+    send_safe(chat_id, text, markup)
