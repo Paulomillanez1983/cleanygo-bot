@@ -4,7 +4,7 @@ VERSIÓN CON PRECIO PERSONALIZADO Y TRACKING EN TIEMPO REAL
 """
 
 from telebot import types
-from config import logger, get_db_connection, set_state
+from config import logger, get_db_connection, set_state, get_data, clear_state
 from models.states import UserState
 from utils.icons import Icons
 from utils.telegram_safe import send_safe, edit_safe
@@ -65,7 +65,7 @@ def register_handlers(bot):
             )
             return
 
-        # Asignar worker pero mantener estado waiting_price (esperando precio)
+        # Asignar worker
         success = assign_worker_to_request_safe(request_id, worker_id)
 
         if not success:
@@ -78,7 +78,7 @@ def register_handlers(bot):
             "client_id": request.get("client_id") or request.get("client_chat_id"),
             "service_id": request.get("service_id"),
             "hora": request.get("hora"),
-            "message_id": call.message.message_id  # Para editar después
+            "message_id": call.message.message_id
         })
 
         bot.answer_callback_query(call.id, "💰 Ingresá el precio del servicio")
@@ -106,12 +106,16 @@ Escribí el monto en números (ej: 18000)
 
     # ===================== WORKER INGRESA PRECIO =====================
 
-    @bot.message_handler(func=lambda m: get_user_state(m.chat.id) == UserState.WORKER_ENTERING_PRICE.value)
+    @bot.message_handler(func=lambdaSA PRECIO =====================
+
+    @bot.message_handler(func=lambda m: get_worker_state(m.chat.id) == UserState.WORKER_ENTERING_PRICE.value)
     def handle_worker_price_input(message):
 
         worker_id = message.chat.id
-        state_data = get_state(worker_id)
-
+        
+        # Obtener datos del estado
+        state_data = get_data(worker_id)
+        
         if not state_data:
             return
 
@@ -279,9 +283,9 @@ Precio: ${price}
 
         if worker_id:
             send_safe(worker_id, f"{Icons.ERROR} El cliente no aceptó el precio. Buscando otros trabajos...")
-            set_state(worker_id, UserState.SELECTING_ROLE.value)
+            clear_state(worker_id)
 
-        # Volver a buscar otro worker (lógica adicional según necesites)
+        # TODO: Volver a buscar otro worker o cancelar solicitud
 
 
     # ===================== START JOB CON TRACKING =====================
@@ -437,43 +441,14 @@ Presioná finalizar cuando termines.
 """
         )
 
-        set_state(worker_id, UserState.SELECTING_ROLE.value)
+        clear_state(worker_id)
 
 
 # ===================================================
-# HELPERS (agregar en states.py o donde corresponda)
+# HELPER PARA OBTENER ESTADO
 # ===================================================
 
-def get_user_state(chat_id):
-    """Obtener estado actual del usuario"""
-    try:
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT state FROM user_states WHERE chat_id = ?",
-                (str(chat_id),)
-            )
-            row = cursor.fetchone()
-            return row["state"] if row else None
-    except Exception as e:
-        logger.error(f"[GET STATE ERROR]: {e}")
-        return None
-
-
-def get_state(chat_id):
-    """Obtener estado y datos del usuario"""
-    try:
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT state, data FROM user_states WHERE chat_id = ?",
-                (str(chat_id),)
-            )
-            row = cursor.fetchone()
-            if row and row["data"]:
-                import json
-                return json.loads(row["data"])
-            return {}
-    except Exception as e:
-        logger.error(f"[GET STATE DATA ERROR]: {e}")
-        return {}
+def get_worker_state(chat_id):
+    """Obtener estado actual del usuario desde el módulo states"""
+    from models.states import _state_store
+    return _state_store.get(chat_id)
