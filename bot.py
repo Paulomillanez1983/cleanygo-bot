@@ -160,16 +160,24 @@ def webhook():
 
     try:
 
-        # validación
-        ...
+        update_dict = request.get_json()
+        update_id = update_dict.get("update_id")
 
-        # evitar duplicados
-        ...
+        # Evitar duplicados
+        with lock:
 
-        # logging callback
-        ...
+            if last_update_id == update_id:
+                return jsonify({"duplicate": True}), 200
 
-        # procesar update
+            last_update_id = update_id
+
+        # Logging callbacks
+        if update_dict.get("callback_query"):
+
+            data = update_dict["callback_query"].get("data", "N/A")
+            logger.info(f"[WEBHOOK] Callback: {data}")
+
+        # Procesar update
         update = Update.de_json(update_dict)
 
         threading.Thread(
