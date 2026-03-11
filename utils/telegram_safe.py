@@ -1,4 +1,8 @@
-from config import logger
+from config import logger, get_bot
+from telebot import types
+
+bot = get_bot()
+
 
 def send_safe(bot, chat_id, text, reply_markup=None, parse_mode="HTML"):
     try:
@@ -45,3 +49,18 @@ def answer_callback_safe(bot, callback_id, text=None, alert=False):
     except Exception as e:
         logger.error(f"[CALLBACK ERROR] {e}")
         return None
+
+
+# ===============================
+# REMOVE KEYBOARD
+# ===============================
+
+def remove_keyboard(chat_id, text="Procesando..."):
+    try:
+        bot.send_message(
+            chat_id,
+            text,
+            reply_markup=types.ReplyKeyboardRemove()
+        )
+    except Exception as e:
+        logger.error(f"[REMOVE_KB ERROR] {e}")
