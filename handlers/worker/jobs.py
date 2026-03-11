@@ -4,8 +4,8 @@ VERSIÓN CON PRECIO PERSONALIZADO Y TRACKING EN TIEMPO REAL
 """
 
 from telebot import types
-from config import logger, get_db_connection
-from models.states import UserState, set_state, get_data, clear_state, get_state
+from config import logger, get_db_connection, set_state, get_data, clear_state, get_session
+from models.states import UserState
 from utils.icons import Icons
 from utils.telegram_safe import send_safe, edit_safe
 from services.request_service import (
@@ -73,7 +73,7 @@ def register_handlers(bot):
             return
 
         # Guardar en estado que está esperando ingresar precio
-        set_state(worker_id, UserState.WORKER_ENTERING_PRICE, {
+        set_state(worker_id, UserState.WORKER_ENTERING_PRICE.value, {
             "request_id": request_id,
             "client_id": request.get("client_id") or request.get("client_chat_id"),
             "service_id": request.get("service_id"),
@@ -82,7 +82,8 @@ def register_handlers(bot):
         })
 
         # Verificar que se guardó
-        logger.info(f"[STATE SET] worker_id={worker_id}, state={get_state(worker_id)}")
+        session = get_session(worker_id)
+        logger.info(f"[STATE SET] worker_id={worker_id}, state={session.get('state')}")
 
         bot.answer_callback_query(call.id, "💰 Ingresá el precio del servicio")
 
@@ -111,7 +112,8 @@ Escribí el monto en números (ej: 18000)
 
     def check_worker_entering_price(message):
         """Verificar si el usuario está en estado WORKER_ENTERING_PRICE"""
-        current_state = get_state(message.chat.id)
+        session = get_session(message.chat.id)
+        current_state = session.get("state")
         expected = UserState.WORKER_ENTERING_PRICE.value
         logger.info(f"[CHECK STATE] chat_id={message.chat.id}, state={current_state}, expected={expected}")
         return current_state == expected
@@ -124,7 +126,8 @@ Escribí el monto en números (ej: 18000)
         logger.info(f"[PRICE INPUT] chat_id={worker_id}, text={message.text}")
         
         # Obtener datos del estado
-        state_data = get_data(worker_id)
+        session = get_session(worker_id)
+        state_data = session.get("data", {})
         
         logger.info(f"[STATE DATA] {state_data}")
         
@@ -161,7 +164,7 @@ Escribí el monto en números (ej: 18000)
             return
 
         # Cambiar estado del worker
-        set_state(worker_id, UserState.JOB_IN_PROGRESS, {
+        set_state(worker_id, UserState.JOB_IN_PROGRESS.value, {
             "request_id": request_id,
             "client_id": client_id,
             "service_id": service_id,
