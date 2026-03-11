@@ -92,7 +92,7 @@ def register_handlers(bot):
         default_price = SERVICES_PRICES.get(service_id, {}).get("price", 0)
         service_name = SERVICES_PRICES.get(service_id, {"name": service_id})["name"]
 
-        edit_safe(
+        result = edit_safe(
             worker_id,
             call.message.message_id,
             f"""
@@ -106,6 +106,7 @@ Hora: {request.get('hora')}
 Escribí el monto en números (ej: 18000)
 """
         )
+        logger.info(f"[EDIT RESULT] {result}")
 
 
     # ===================== WORKER INGRESA PRECIO =====================
@@ -158,6 +159,7 @@ Escribí el monto en números (ej: 18000)
                     (price, request_id)
                 )
                 conn.commit()
+                logger.info(f"[PRICE SAVED] request_id={request_id}, price={price}")
         except Exception as e:
             logger.error(f"[PRICE SAVE ERROR]: {e}")
             send_safe(worker_id, f"{Icons.ERROR} Error guardando el precio. Intentá de nuevo.")
@@ -178,7 +180,7 @@ Escribí el monto en números (ej: 18000)
         service_name = SERVICES_PRICES.get(service_id, {"name": service_id})["name"]
 
         # Confirmar al worker
-        send_safe(
+        result1 = send_safe(
             worker_id,
             f"""
 {Icons.SUCCESS} <b>Precio enviado: ${price}</b>
@@ -186,6 +188,7 @@ Escribí el monto en números (ej: 18000)
 Esperando que el cliente acepte...
 """
         )
+        logger.info(f"[WORKER NOTIFY RESULT] {result1}")
 
         # Notificar al cliente con el precio propuesto
         text = f"""
@@ -211,20 +214,24 @@ Servicio: {service_name}
             )
         )
 
-        send_safe(client_id, text, reply_markup=markup)
+        result2 = send_safe(client_id, text, reply_markup=markup)
+        logger.info(f"[CLIENT NOTIFY RESULT] {result2}")
 
 
     # ===================== CLIENTE ACEPTA PRECIO =====================
 
     @bot.callback_query_handler(func=lambda c: c.data.startswith("client_accept_price:"))
     def handle_client_accept_price(call):
+        logger.info(f"[CLIENT_ACCEPT_PRICE] callback_data={call.data}")
 
         client_id = call.message.chat.id
         request_id = int(call.data.split(":")[1])
 
         request = get_request(request_id)
+        logger.info(f"[REQUEST DATA] {request}")
 
         if not request:
+            logger.error(f"[CLIENT_ACCEPT_PRICE] Request {request_id} not found")
             return
 
         # Obtener datos
@@ -233,9 +240,15 @@ Servicio: {service_name}
         service_id = request.get("service_id")
         service_name = SERVICES_PRICES.get(service_id, {"name": service_id})["name"]
 
+        logger.info(f"[ACCEPT DATA] worker_id={worker_id}, price={price}, service={service_name}")
+
         update_request_status(request_id, "accepted")
 
-        edit_safe(
+        # Responder al callback primero
+        bot.answer_callback_query(call.id, "✅ Servicio confirmado")
+
+        # Editar mensaje del cliente
+        result1 = edit_safe(
             client_id,
             call.message.message_id,
             f"""
@@ -247,12 +260,14 @@ Servicio: {service_name}
 El profesional está en camino. Podés ver su ubicación en tiempo real 📍
 """
         )
+        logger.info(f"[CLIENT EDIT RESULT] {result1}")
 
         if not worker_id:
+            logger.error("[CLIENT_ACCEPT_PRICE] No worker_id found")
             return
 
         # Notificar al worker
-        send_safe(
+        result2 = send_safe(
             worker_id,
             f"""
 {Icons.SUCCESS} <b>¡El cliente aceptó!</b>
@@ -261,6 +276,7 @@ Precio: ${price}
 {Icons.ROCKET} Podés iniciar el servicio
 """
         )
+        logger.info(f"[WORKER NOTIFY RESULT] {result2}")
 
         markup = types.InlineKeyboardMarkup()
 
@@ -271,7 +287,8 @@ Precio: ${price}
             )
         )
 
-        send_safe(worker_id, "Presioná cuando estés en camino:", reply_markup=markup)
+        result3 = send_safe(worker_id, "Presioná cuando estés en camino:", reply_markup=markup)
+        logger.info(f"[WORKER BUTTON RESULT] {result3}")
 
 
     # ===================== CLIENTE RECHAZA PRECIO =====================
@@ -290,6 +307,8 @@ Precio: ${price}
         worker_id = request.get("worker_id") or request.get("worker_chat_id")
 
         update_request_status(request_id, "rejected")
+
+        bot.answer_callback_query(call.id, "❌ Solicitud cancelada")
 
         edit_safe(
             client_id,
@@ -320,6 +339,8 @@ Precio: ${price}
         client_id = request.get("client_id") or request.get("client_chat_id")
 
         update_request_status(request_id, "in_progress")
+
+        bot.answer_callback_query(call.id, "🚀 Servicio iniciado")
 
         # Notificar al cliente que el profesional inició
         send_safe(
@@ -433,6 +454,8 @@ Presioná finalizar cuando termines.
             del active_tracking[worker_id]
 
         update_request_status(request_id, "completed")
+
+        bot.answer_callback_query(call.id, "✅ Servicio finalizado")
 
         # Notificar al cliente
         send_safe(
