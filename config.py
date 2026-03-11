@@ -239,10 +239,6 @@ def _create_indexes(cursor):
         "CREATE INDEX IF NOT EXISTS idx_requests_status ON requests(status)"
     )
 def _run_migrations(cursor):
-    """
-    Migraciones seguras de la base de datos.
-    Agrega columnas si no existen.
-    """
 
     # workers.last_seen
     cursor.execute("PRAGMA table_info(workers)")
@@ -263,6 +259,17 @@ def _run_migrations(cursor):
             "ALTER TABLE requests ADD COLUMN hora TEXT"
         )
         logger.info("✅ Migración aplicada: requests.hora")
+
+    # workers.rating
+    cursor.execute("PRAGMA table_info(workers)")
+    columns = [row[1] for row in cursor.fetchall()]
+
+    if "rating" not in columns:
+        cursor.execute(
+            "ALTER TABLE workers ADD COLUMN rating REAL DEFAULT 5"
+        )
+        logger.info("✅ Migración aplicada: workers.rating")
+        
         
 # ==================== DB EXECUTE CON RETRY ====================
 
