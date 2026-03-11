@@ -295,7 +295,6 @@ def handle_client_confirm(call):
     from services.request_service import create_request
     
     try:
-    try:
     request_id = create_request(
         client_id=chat_id,
         service_id=service_id,
