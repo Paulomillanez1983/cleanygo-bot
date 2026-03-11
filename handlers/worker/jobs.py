@@ -18,7 +18,9 @@ import time
 from threading import Thread
 
 bot = None
-
+def register_handlers(bot_instance):
+    global bot
+    bot = bot_instance
 # ===================== PRECIOS =====================
 
 SERVICES_PRICES = {
