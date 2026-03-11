@@ -61,3 +61,7 @@ def clear_state(user_id: int):
 
     _state_store.pop(user_id, None)
     _data_store.pop(user_id, None)
+# Agregar esta función al final de states.py para poder importarla
+def get_state(user_id: int):
+    """Obtener estado actual del usuario"""
+    return _state_store.get(user_id)
