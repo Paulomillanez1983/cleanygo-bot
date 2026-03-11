@@ -5,7 +5,8 @@ VERSIÓN CON PRECIO PERSONALIZADO Y TRACKING EN TIEMPO REAL
 
 from telebot import types
 from config import logger, get_db_connection, set_state, get_data, clear_state
-from models.states import UserState, _state_store  # Importar directamente el store
+from models import states  # Importar el módulo completo, no solo los objetos
+from models.states import UserState
 from utils.icons import Icons
 from utils.telegram_safe import send_safe, edit_safe
 from services.request_service import (
@@ -83,7 +84,7 @@ def register_handlers(bot):
 
         # Verificar que se guardó
         logger.info(f"[STATE SET] worker_id={worker_id}, state={UserState.WORKER_ENTERING_PRICE.value}")
-        logger.info(f"[STATE VERIFY] current_state={_state_store.get(worker_id)}")
+        logger.info(f"[STATE VERIFY] current_state={states._state_store.get(worker_id)}")
 
         bot.answer_callback_query(call.id, "💰 Ingresá el precio del servicio")
 
@@ -112,8 +113,8 @@ Escribí el monto en números (ej: 18000)
 
     def check_worker_entering_price(message):
         """Verificar si el usuario está en estado WORKER_ENTERING_PRICE"""
-        current_state = _state_store.get(message.chat.id)  # Leer directamente del store
-        logger.info(f"[CHECK STATE] chat_id={message.chat.id}, state={current_state}, expected={UserState.WORKER_ENTERING_PRICE.value}")
+        current_state = states._state_store.get(message.chat.id)  # Acceder vía el módulo
+        logger.info(f"[CHECK STATE] chat_id={message.chat.id}, state={current_state}, store_id={id(states._state_store)}")
         return current_state == UserState.WORKER_ENTERING_PRICE.value
 
     @bot.message_handler(func=check_worker_entering_price)
