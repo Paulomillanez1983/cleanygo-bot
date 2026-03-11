@@ -97,7 +97,9 @@ def load_handlers():
         import handlers.worker.flow
         logger.info("[INIT] Worker flow cargado")
 
-        import handlers.worker.jobs
+        from handlers.worker.jobs import register_handlers
+        register_handlers(bot)
+
         logger.info("[INIT] Worker jobs cargados")
 
         logger.info(f"[DEBUG] Message handlers: {len(bot.message_handlers)}")
