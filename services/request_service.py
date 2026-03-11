@@ -1,7 +1,6 @@
 """
 Servicios para gestión de solicitudes (requests)
 """
-import sqlite3
 from datetime import datetime
 from config import get_db_connection, logger
 
@@ -16,7 +15,6 @@ def create_request(client_id, service_id, hora, lat, lon, status="searching"):
     """
 
     try:
-
         with get_db_connection() as conn:
 
             cursor = conn.cursor()
@@ -37,6 +35,8 @@ def create_request(client_id, service_id, hora, lat, lon, status="searching"):
 
             request_id = cursor.lastrowid
 
+            conn.commit()
+
             logger.info(f"[REQUEST] Creada solicitud {request_id} para {client_id}")
 
             return request_id
@@ -55,7 +55,6 @@ def create_request(client_id, service_id, hora, lat, lon, status="searching"):
 def get_request(request_id):
 
     try:
-
         with get_db_connection() as conn:
 
             cursor = conn.cursor()
@@ -67,7 +66,11 @@ def get_request(request_id):
 
             row = cursor.fetchone()
 
-            return dict(row) if row else None
+            if not row:
+                logger.warning(f"[REQUEST] {request_id} no encontrada")
+                return None
+
+            return dict(row)
 
     except Exception as e:
 
@@ -83,7 +86,6 @@ def get_request(request_id):
 def update_request_status(request_id, status):
 
     try:
-
         with get_db_connection() as conn:
 
             cursor = conn.cursor()
@@ -92,6 +94,12 @@ def update_request_status(request_id, status):
                 "UPDATE requests SET status = ? WHERE id = ?",
                 (status, request_id)
             )
+
+            conn.commit()
+
+            if cursor.rowcount == 0:
+                logger.warning(f"[REQUEST] No se encontró request {request_id} para actualizar")
+                return False
 
             logger.info(f"[REQUEST] {request_id} -> {status}")
 
@@ -111,12 +119,10 @@ def update_request_status(request_id, status):
 def assign_worker_to_request_safe(request_id, worker_id):
     """
     Asignación segura anti-race-condition.
-
     Solo un worker puede ganar el trabajo.
     """
 
     try:
-
         with get_db_connection() as conn:
 
             cursor = conn.cursor()
@@ -159,6 +165,8 @@ def assign_worker_to_request_safe(request_id, worker_id):
 
 def cancel_request(request_id, reason=""):
 
+    logger.info(f"[CANCEL] Request {request_id} cancelada | reason={reason}")
+
     return update_request_status(request_id, "cancelled")
 
 
@@ -168,17 +176,47 @@ def cancel_request(request_id, reason=""):
 
 def complete_request(request_id):
 
+    logger.info(f"[COMPLETE] Request {request_id} completada")
+
     return update_request_status(request_id, "completed")
 
 
 # =====================================================
-# REJECT
+# REJECT (WORKER RECHAZA)
 # =====================================================
 
 def reject_request(request_id, worker_id):
+    """
+    Cuando un worker rechaza una solicitud,
+    vuelve al estado searching para otro worker.
+    """
 
-    logger.info(
-        f"[REJECT] Worker {worker_id} rechazó request {request_id}"
-    )
+    try:
+        with get_db_connection() as conn:
 
-    return True
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                UPDATE requests
+                SET worker_id = NULL,
+                    status = 'searching'
+                WHERE id = ?
+            """, (request_id,))
+
+            conn.commit()
+
+            if cursor.rowcount == 0:
+                logger.warning(f"[REJECT] Request {request_id} no encontrada")
+                return False
+
+            logger.info(
+                f"[REJECT] Worker {worker_id} rechazó request {request_id}"
+            )
+
+            return True
+
+    except Exception as e:
+
+        logger.error(f"[REJECT ERROR] {e}")
+
+        return False
