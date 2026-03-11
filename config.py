@@ -244,6 +244,7 @@ def _run_migrations(cursor):
     Agrega columnas si no existen.
     """
 
+    # workers.last_seen
     cursor.execute("PRAGMA table_info(workers)")
     columns = [row[1] for row in cursor.fetchall()]
 
@@ -252,6 +253,16 @@ def _run_migrations(cursor):
             "ALTER TABLE workers ADD COLUMN last_seen INTEGER DEFAULT 0"
         )
         logger.info("✅ Migración aplicada: workers.last_seen")
+
+    # requests.hora
+    cursor.execute("PRAGMA table_info(requests)")
+    columns = [row[1] for row in cursor.fetchall()]
+
+    if "hora" not in columns:
+        cursor.execute(
+            "ALTER TABLE requests ADD COLUMN hora TEXT"
+        )
+        logger.info("✅ Migración aplicada: requests.hora")
         
 # ==================== DB EXECUTE CON RETRY ====================
 
