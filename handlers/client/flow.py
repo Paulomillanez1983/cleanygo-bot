@@ -292,21 +292,21 @@ Te avisaremos cuando alguien acepte.
 def handle_client_confirm(call):
 
     chat_id = call.message.chat.id
-
     service_id = get_data(chat_id, "service_id")
     service_name = get_data(chat_id, "service_name")
     time_str = get_data(chat_id, "selected_time")
     lat = get_data(chat_id, "lat")
     lon = get_data(chat_id, "lon")
 
-    if not all([service_id, time_str, lat, lon]):
+    if not all([service_id, service_name, time_str, lat, lon]):
         bot.answer_callback_query(call.id, "❌ Error: datos incompletos", show_alert=True)
         return
 
     from services.request_service import create_request
+    from services.matching_service import notify_nearby_workers
 
     try:
-
+        # Crear solicitud en DB
         request_id = create_request(
             client_id=chat_id,
             service_id=service_id,
@@ -322,19 +322,18 @@ def handle_client_confirm(call):
         logger.info(f"[REQUEST] Creada solicitud {request_id}")
 
     except Exception as e:
-
         logger.error(f"[REQUEST CREATE ERROR] {e}")
-
         bot.answer_callback_query(call.id, "❌ Error creando solicitud", show_alert=True)
-
         return
 
+    # Cambiar estado del cliente a esperando aceptación
     set_state(chat_id, UserState.CLIENT_WAITING_ACCEPTANCE.value, {
         "request_id": request_id
     })
 
     bot.answer_callback_query(call.id, "✅ Solicitud enviada")
 
+    # Mensaje de confirmación
     text = f"""
 {Icons.SEARCH} <b>¡Solicitud enviada!</b>
 
@@ -342,40 +341,23 @@ Estamos buscando profesionales disponibles para las {time_str} PM.
 
 ⏳ Esperando aceptación...
 """
-
     markup = types.InlineKeyboardMarkup()
-
     markup.add(
         types.InlineKeyboardButton(
             f"{Icons.ERROR} Cancelar solicitud",
             callback_data=f"client_cancel_request:{request_id}"
         )
     )
-
     edit_safe(chat_id, call.message.message_id, text, markup)
 
-    from services.matching_service import notify_nearby_workers
-
-    notify_nearby_workers(request_id, lat, lon, service_id)
-
-
-# ==================== CANCELAR CONFIRMACIÓN ====================
-
-@bot.callback_query_handler(func=lambda c: c.data == "confirm_no")
-def handle_client_cancel_confirmation(call):
-
-    chat_id = call.message.chat.id
-
-    bot.answer_callback_query(call.id, "❌ Cancelado")
-
-    edit_safe(
-        chat_id,
-        call.message.message_id,
-        f"{Icons.ERROR} Solicitud cancelada. Usá /start para comenzar de nuevo."
+    # Notificar prestadores cercanos
+    notify_nearby_workers(
+        request_id=request_id,
+        service_name=service_name,  # nombre del servicio
+        lat=lat,
+        lon=lon,
+        hora=time_str
     )
-
-    clear_state(chat_id)
-
 
 # ==================== CANCELAR SOLICITUD ====================
 
