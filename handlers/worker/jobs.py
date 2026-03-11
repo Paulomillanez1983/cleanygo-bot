@@ -1,6 +1,6 @@
 """
 Handlers para gestión de trabajos/asignaciones para profesionales.
-VERSIÓN CORREGIDA PARA CLEANYGO
+VERSIÓN FINAL CORREGIDA PARA CLEANYGO
 """
 
 from telebot import types
@@ -17,6 +17,7 @@ from services.request_service import (
 import time
 from threading import Thread
 
+
 active_tracking = {}
 
 # ===================== PRECIOS =====================
@@ -28,6 +29,10 @@ SERVICES_PRICES = {
     "ac_tech": {"name": "Visita técnica A/C", "price": 20000},
 }
 
+
+# ===================================================
+# REGISTER
+# ===================================================
 
 def register_handlers(bot):
 
@@ -64,7 +69,6 @@ def register_handlers(bot):
         success = assign_worker_to_request_safe(request_id, worker_id)
 
         if not success:
-
             bot.answer_callback_query(call.id, "❌ No se pudo asignar")
             return
 
@@ -96,6 +100,7 @@ def register_handlers(bot):
 
         service_id = request.get("service_id")
 
+        # Obtener precio del worker
         try:
             with get_db_connection() as conn:
 
@@ -107,7 +112,6 @@ def register_handlers(bot):
                 )
 
                 row = cursor.fetchone()
-
                 price = row["precio"] if row else None
 
         except Exception as e:
@@ -140,6 +144,7 @@ Servicio: {service_name}
         )
 
         send_safe(bot, client_id, text, reply_markup=markup)
+
 
     # ===================== CLIENTE ACEPTA =====================
 
@@ -180,6 +185,7 @@ Servicio: {service_name}
         )
 
         send_safe(bot, worker_id, "Podés iniciar el servicio", reply_markup=markup)
+
 
     # ===================== START JOB =====================
 
@@ -226,7 +232,6 @@ Servicio: {service_name}
                         )
 
                 except Exception as e:
-
                     logger.error(f"[LOCATION ERROR] {e}")
 
                 time.sleep(10)
@@ -234,3 +239,46 @@ Servicio: {service_name}
         active_tracking[worker_id] = {"running": True}
 
         Thread(target=location_loop, daemon=True).start()
+
+        markup = types.InlineKeyboardMarkup()
+        markup.add(
+            types.InlineKeyboardButton(
+                f"{Icons.CHECK} Finalizar servicio",
+                callback_data=f"finish_job:{request_id}"
+            )
+        )
+
+        send_safe(
+            bot,
+            worker_id,
+            "Servicio en curso. Cuando termines, presioná finalizar.",
+            reply_markup=markup
+        )
+
+
+    # ===================== FINALIZAR =====================
+
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("finish_job:"))
+    def handle_finish_job(call):
+
+        worker_id = call.message.chat.id
+        request_id = int(call.data.split(":")[1])
+
+        request = get_request(request_id)
+
+        if not request:
+            return
+
+        client_id = request.get("client_id") or request.get("client_chat_id")
+
+        if worker_id in active_tracking:
+            active_tracking[worker_id]["running"] = False
+            del active_tracking[worker_id]
+
+        update_request_status(request_id, "completed")
+
+        send_safe(bot, client_id, "✅ Servicio finalizado")
+
+        send_safe(bot, worker_id, "🎉 Gracias por tu trabajo")
+
+        set_state(worker_id, UserState.SELECTING_ROLE.value)
